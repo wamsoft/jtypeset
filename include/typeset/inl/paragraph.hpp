@@ -46,6 +46,8 @@ struct InlineRun {
     std::optional<ObjectRef> objectRef;                 ///< 未解決（FlowLayouter が解決する）
     /// 脚注。この run が本文中の記号（text は "{fn}"。FlowLayouter が番号に置き換え、段末に注を置く）
     std::shared_ptr<const Paragraph> footnote;
+    /// true なら `{name}` の置換や `{index:}` の収集をしない（コードなど、波括弧をそのまま出す run）
+    bool literal = false;
 };
 
 struct Paragraph {

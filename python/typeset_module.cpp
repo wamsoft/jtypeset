@@ -207,7 +207,8 @@ PYBIND11_MODULE(_typeset, m) {
              }),
              py::arg("text"), py::arg("style"))
         .def_readwrite("text", &inl::InlineRun::text)
-        .def_readwrite("style", &inl::InlineRun::style);
+        .def_readwrite("style", &inl::InlineRun::style)
+        .def_readwrite("literal", &inl::InlineRun::literal);
 
     py::class_<inl::Paragraph>(m, "Paragraph")
         .def(py::init<>())
@@ -219,9 +220,14 @@ PYBIND11_MODULE(_typeset, m) {
         .def_readwrite("runs", &inl::Paragraph::runs)
         .def_readwrite("annotations", &inl::Paragraph::annotations)
         .def_readwrite("style", &inl::Paragraph::style)
-        .def("add_run", [](inl::Paragraph& p, std::u16string text, TextStyle st) {
-                 p.runs.push_back(inl::InlineRun{std::move(text), std::move(st)});
-             }, py::arg("text"), py::arg("style"))
+        .def("add_run", [](inl::Paragraph& p, std::u16string text, TextStyle st, bool literal) {
+                 inl::InlineRun r;
+                 r.text = std::move(text);
+                 r.style = std::move(st);
+                 r.literal = literal;
+                 p.runs.push_back(std::move(r));
+             }, py::arg("text"), py::arg("style"), py::arg("literal") = false,
+             "run を足す。literal なら {name} の置換や {index:} の収集をしない（コード用）")
         .def("annotate", [](inl::Paragraph& p, inl::Annotation a) { p.annotations.push_back(std::move(a)); })
         .def("add_image",
              [](inl::Paragraph& p, std::shared_ptr<dl::Image> img, Size size, TextStyle st) {
@@ -399,6 +405,18 @@ PYBIND11_MODULE(_typeset, m) {
         .def_readwrite("line_height", &block::TocBlock::lineHeight)
         .def_readwrite("leader", &block::TocBlock::leader)
         .def_readwrite("block", &block::TocBlock::block);
+    py::class_<block::IndexBlock>(m, "IndexBlock",
+                                  "索引。本文の {index:用語} / {index:よみ|用語} を集めて読みの順に並べる")
+        .def(py::init<>())
+        .def(py::init([](TextStyle style) { block::IndexBlock b; b.style = std::move(style); return b; }),
+             py::arg("style"))
+        .def_readwrite("style", &block::IndexBlock::style)
+        .def_readwrite("group_style", &block::IndexBlock::groupStyle)
+        .def_readwrite("grouped", &block::IndexBlock::grouped)
+        .def_readwrite("leader", &block::IndexBlock::leader)
+        .def_readwrite("line_height", &block::IndexBlock::lineHeight)
+        .def_readwrite("page_separator", &block::IndexBlock::pageSeparator)
+        .def_readwrite("block", &block::IndexBlock::block);
 
     py::class_<block::Flow>(m, "Flow")
         .def(py::init<>())
@@ -408,6 +426,7 @@ PYBIND11_MODULE(_typeset, m) {
              py::arg("style") = std::nullopt, py::arg("numbered") = false)
         .def("add_list", &block::Flow::addList, py::arg("list"))
         .def("add_toc", &block::Flow::addToc, py::arg("toc"))
+        .def("add_index", &block::Flow::addIndex, py::arg("index"))
         .def("add_labeled", &block::Flow::addLabeled, py::arg("label"), py::arg("body"),
              py::arg("label_width"), py::arg("gap") = 0.0f, py::arg("style") = block::BlockStyle{})
         .def("add_rule", &block::Flow::addRule, py::arg("thickness") = 0.5f,

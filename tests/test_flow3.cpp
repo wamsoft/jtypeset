@@ -754,3 +754,79 @@ TEST_CASE("FlowLayouter: keepWithNext carries a rule between heading and paragra
     CHECK(hasHeading(pages[1]));
     CHECK(hasRedRule(pages[1]));
 }
+
+TEST_CASE("FlowLayouter: index collects {index:} markers with pages and sorts by reading") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+
+    page::PageSequence seq;
+    seq.master.size = Size{300, 200};
+    seq.master.margin = page::Margins{20, 20, 20, 20};
+    seq.master.writingMode = WritingMode::HorizontalTb;
+    const TextStyle body = fx.style(10.0f);
+
+    block::Flow flow;
+    inl::Paragraph p1 = inl::Paragraph::plain(u"組版{index:くみはん|組版}の話。ルビ{index:るび|ルビ}も。", body);
+    p1.annotations.push_back(inl::Annotation::ruby(0, 2, u"くみはん"));   // 記号を消しても位置がずれない
+    flow.addParagraph(p1);
+    flow.addPageBreak();
+    flow.addParagraph(inl::Paragraph::plain(u"二ページ目でも組版{index:くみはん|組版}。Ascii{index:ascii|ASCII}。", body));
+    flow.addPageBreak();
+    block::IndexBlock idx;
+    idx.style = fx.style(9.0f);
+    flow.addIndex(idx);
+
+    page::FlowLayouter layouter(fx.fonts);
+    const auto pages = layouter.layout(flow, seq);
+    REQUIRE(pages.size() == 3);
+
+    auto textOf = [&](const page::Page& pg, float size) {
+        // gid 列を文字に戻せないので、特定文字の有無で見る
+        std::vector<uint32_t> gids;
+        for (const dl::Item& item : pg.dl.items) {
+            if (const auto* run = std::get_if<dl::GlyphRun>(&item)) {
+                if (run->size == doctest::Approx(size)) for (const dl::Glyph& g : run->glyphs) gids.push_back(g.gid);
+            }
+        }
+        return gids;
+    };
+    auto has = [&](const std::vector<uint32_t>& gids, char32_t c) {
+        const uint32_t gid = fx.jp->glyphIndex(c);
+        return std::find(gids.begin(), gids.end(), gid) != gids.end();
+    };
+    // 本文には '{' が残らない
+    CHECK_FALSE(has(textOf(pages[0], 10.0f), U'{'));
+    CHECK_FALSE(has(textOf(pages[1], 10.0f), U'{'));
+    // 索引ページ: 用語（組・ル・A）とページ番号 1, 2、見出し文字（か・ら・A）がある
+    const std::vector<uint32_t> ix = textOf(pages[2], 9.0f);
+    CHECK(has(ix, U'組'));
+    CHECK(has(ix, U'ル'));
+    CHECK(has(ix, U'A'));
+    CHECK(has(ix, U'1'));
+    CHECK(has(ix, U'2'));
+    CHECK(has(ix, U','));   // 組版は 1, 2 の 2 ページ
+    // 読み順: "ascii" < "くみはん" < "るび" → A、組、ル の順（y が増える）
+    auto yOf = [&](char32_t c) {
+        const uint32_t gid = fx.jp->glyphIndex(c);
+        for (const dl::Item& item : pages[2].dl.items) {
+            if (const auto* run = std::get_if<dl::GlyphRun>(&item)) {
+                if (run->size != doctest::Approx(9.0f)) continue;
+                for (const dl::Glyph& g : run->glyphs) if (g.gid == gid) return g.pos.y;
+            }
+        }
+        return -1.0f;
+    };
+    CHECK(yOf(U'A') < yOf(U'組'));
+    CHECK(yOf(U'組') < yOf(U'ル'));
+    // ルビは消した記号のぶんずれず「組版」の上に乗る（ルビの x が本文先頭付近）
+    float rubyX = 1e9f, firstX = 1e9f;
+    for (const dl::Item& item : pages[0].dl.items) {
+        if (const auto* run = std::get_if<dl::GlyphRun>(&item)) {
+            for (const dl::Glyph& g : run->glyphs) {
+                if (run->size < 9.0f) rubyX = std::min(rubyX, g.pos.x);
+                else firstX = std::min(firstX, g.pos.x);
+            }
+        }
+    }
+    CHECK(rubyX < firstX + 12.0f);
+}

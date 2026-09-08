@@ -70,7 +70,8 @@ make build
 - 段落・見出し（自動採番、PDF しおり）・箇条書き・コードブロック（背景・空白保持）・罫線・ラベル付き段落（台本の名前欄）
 - 画像（配置・回り込み・キャプション）、表（自動列幅、colspan / rowspan、セルの縦位置、ヘッダ繰り返し、段より高い行の分割）
 - ページマスタ（判型・内外余白・段組・柱・ノンブル）、改ページ制御（orphans / widows / keepWithNext / keepTogether）、
-  段の途中の段抜きと最終ページの段揃え、目次、図表番号と相互参照（`{ref:label}` `{page:label}`）、脚注（段末に集める）
+  段の途中の段抜きと最終ページの段揃え、目次、索引（`{index:よみ|用語}`）、図表番号と相互参照（`{ref:label}` `{page:label}`）、
+  脚注（段末に集める）
 - 外部オブジェクトの差し込み: 本文に「ハンドラ名＋ソース」を書き、登録した関数／外部コマンドが返す SVG や描画命令を
   行内（ベースライン揃え）・別行立て（式番号・`{ref:}` 参照）に置く。数式レンダラ（MathJax / dvisvgm / Typst）や
   グラフ（matplotlib）を本体に依存を足さずにつなげる。LaTeX 数式は `handlers/microtex/`（MicroTeX、任意ターゲット）で
@@ -109,7 +110,8 @@ python -m typeset.md report.md -o out.pdf --png 120 --math mathtext   # 数式�
 箇条書き／番号付き（入れ子）、コードブロック（背景・空白保持）、表（GFM。直後の「表: 〜」がキャプション）、
 画像（単独の段落なら図番号付きの図、文中なら行内画像）、脚注 `[^1]`、引用、水平線、強調・斜体・行内コード、
 リンク（URL は脚注へ）、数式 `$…$` `$$…$$ (label)`、ルビ（`｜漢字《かんじ》` `漢字《かんじ》` `{漢字|かんじ}`）、
-`<!-- pagebreak -->` `<!-- columnbreak -->` `<!-- columns: 2 -->` `[toc]`。例: `samples/markdown/report.md`。
+`<!-- pagebreak -->` `<!-- columnbreak -->` `<!-- columns: 2 -->` `[toc]` `[index]`（本文の `{index:よみ|用語}` を集める）。
+例: `samples/markdown/report.md`。
 
 フォントを指定しなければ `data/` の Noto、無ければ OS のフォント（Windows: 游明朝／游ゴシック、macOS: ヒラギノ、
 Linux: Noto CJK）を探す。TTC はサブセット化して埋め込む。OS/2 の fsType（Restricted License、ビットマップのみ、

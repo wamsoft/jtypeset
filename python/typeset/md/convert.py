@@ -120,7 +120,7 @@ LABEL_RE = re.compile(r"\s*\{#([A-Za-z0-9_:\-.]+)\}\s*$")
 RUBY_RE = re.compile(
     r"[｜|]([^《》｜|]+?)《([^》]+)》"
     r"|([\u4E00-\u9FFF\u3400-\u4DBF々〆ヶ〇]+)《([^》]+)》"
-    r"|\{([^{}|]+)\|([^{}]+)\}"
+    r"|\{(?!index:|ref:|page:)([^{}|]+)\|([^{}]+)\}"
 )
 
 
@@ -314,6 +314,11 @@ class Converter:
         self.flow.add_paragraph(head, bs)
         self.flow.add_toc(toc)
 
+    def _add_index(self) -> None:
+        idx = ts.IndexBlock(ts.TextStyle(self.opts.font_body, self.opts.size * 0.9))
+        idx.block.space_after = self.opts.size
+        self.flow.add_index(idx)
+
     def _collect_footnotes(self, tokens: List[Token]) -> None:
         i = 0
         while i < len(tokens):
@@ -406,9 +411,12 @@ class Converter:
     def _paragraph_block(self, tokens: List[Token], i: int) -> int:
         inline = tokens[i + 1]
         children = inline.children or []
-        # [toc]
+        # [toc] / [index]
         if inline.content.strip().lower() == "[toc]":
             self._add_toc()
+            return i + 3
+        if inline.content.strip().lower() == "[index]":
+            self._add_index()
             return i + 3
         # 画像だけの段落 → 図
         non_ws = [c for c in children if not (c.type == "text" and not c.content.strip()) and c.type != "softbreak"]
@@ -506,7 +514,9 @@ class Converter:
         ps.align = ts.Align.START
         ps.line_height = 1.45
         ps.first_line_indent = 0.0
-        p = ts.Paragraph(text, self.mono, ps)
+        p = ts.Paragraph()
+        p.style = ps
+        p.add_run(text, self.mono, literal=True)   # コードブロックは {…} を置換しない
         bs = ts.BlockStyle()
         bs.background = ts.Color(242, 242, 242, 255)
         bs.padding = self.opts.size * 0.6
@@ -712,7 +722,7 @@ class Converter:
         def emit(text: str) -> None:
             if not text:
                 return
-            p.add_run(text, cur_style())
+            p.add_run(text, cur_style(), literal=bool(state["code"]))   # コードは {…} をそのまま出す
             state["pos"] += utf16len(text)
             if state["href"] is not None:
                 state["link_text"] += text

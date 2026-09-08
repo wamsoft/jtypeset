@@ -210,8 +210,22 @@ struct TocBlock {
     BlockStyle block;
 };
 
+/**
+ * 索引。本文中の `{index:用語}` / `{index:よみ|用語}` を集め、読みの順（かな: 五十音、欧文: A–Z）に
+ * 用語とページ番号を並べる。目次と同じく前のパスで集めた情報を使う（2〜3 パス）
+ */
+struct IndexBlock {
+    TextStyle style;                        ///< 項目の文字
+    std::optional<TextStyle> groupStyle;    ///< 見出し文字（あ・か・さ… / A・B…）。無ければ style
+    bool grouped = true;                    ///< 行（あ・か・さ…）ごとに見出しを入れる
+    bool leader = true;                     ///< 点線
+    Pt lineHeight = 1.6f;
+    std::u16string pageSeparator = u", ";
+    BlockStyle block;
+};
+
 using Block = std::variant<ParagraphBlock, HeadingBlock, RuleBlock, SpacerBlock, LabeledBlock,
-                           SectionBlock, ImageBlock, TableBlock, ListBlock, TocBlock, ObjectBlock>;
+                           SectionBlock, ImageBlock, TableBlock, ListBlock, TocBlock, ObjectBlock, IndexBlock>;
 
 struct Flow {
     std::vector<Block> blocks;
@@ -231,6 +245,7 @@ struct Flow {
     }
     void addList(ListBlock list) { blocks.push_back(std::move(list)); }
     void addToc(TocBlock toc) { blocks.push_back(std::move(toc)); }
+    void addIndex(IndexBlock idx) { blocks.push_back(std::move(idx)); }
     void addLabeled(inl::Paragraph label, inl::Paragraph body, Pt labelWidth, Pt gap = 0.0f,
                     BlockStyle style = {}) {
         LabeledBlock b;

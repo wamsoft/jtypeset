@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <set>
 
 #include "typeset/text/utf.hpp"
 
@@ -28,6 +29,7 @@ inl::Paragraph substitute(const inl::Paragraph& src,
                           const std::map<std::u16string, std::u16string>& fields) {
     inl::Paragraph out = src;
     for (inl::InlineRun& run : out.runs) {
+        if (run.literal) continue;
         std::u16string& t = run.text;
         size_t pos = 0;
         while ((pos = t.find(u'{', pos)) != std::u16string::npos) {
@@ -48,7 +50,7 @@ inl::Paragraph substitute(const inl::Paragraph& src,
 
 bool hasPlaceholder(const inl::Paragraph& p) {
     for (const inl::InlineRun& r : p.runs) {
-        if (r.text.find(u'{') != std::u16string::npos) return true;
+        if (!r.literal && r.text.find(u'{') != std::u16string::npos) return true;
     }
     return false;
 }
@@ -58,6 +60,37 @@ std::u16string toU16(int v) {
 }
 
 std::u16string toU16(const std::string& s) { return text::utf8ToUtf16(s); }
+
+/// 索引の読みの正規化: カタカナ → ひらがな、長音符・空白を落とす
+std::u16string normalizeReading(const std::u16string& r) {
+    std::u16string out;
+    for (char16_t c : r) {
+        if (c >= 0x30A1 && c <= 0x30F6) c = static_cast<char16_t>(c - 0x60);   // カタカナ → ひらがな
+        if (c == u'ー' || c == u' ' || c == u'\u3000') continue;
+        if (c < 0x80) c = static_cast<char16_t>(std::tolower(static_cast<unsigned char>(c)));
+        out.push_back(c);
+    }
+    return out;
+}
+
+/// 索引の見出し文字（あ・か・さ… / A・B… / 0–9 / 他）
+std::u16string indexGroup(const std::u16string& reading) {
+    if (reading.empty()) return u"他";
+    const char16_t c = reading[0];
+    if (c >= 0x3041 && c <= 0x3096) {
+        static const struct { char16_t upto; const char16_t* head; } rows[] = {
+            {u'お', u"あ"}, {u'ご', u"か"}, {u'ぞ', u"さ"}, {u'ど', u"た"}, {u'の', u"な"},
+            {u'ぽ', u"は"}, {u'も', u"ま"}, {u'よ', u"や"}, {u'ろ', u"ら"}, {0x3096, u"わ"},
+        };
+        for (const auto& row : rows) if (c <= row.upto) return row.head;
+        return u"わ";
+    }
+    if (c < 0x80 && std::isalpha(static_cast<unsigned char>(c))) {
+        return std::u16string(1, static_cast<char16_t>(std::toupper(static_cast<unsigned char>(c))));
+    }
+    if (c < 0x80 && std::isdigit(static_cast<unsigned char>(c))) return u"0–9";
+    return u"他";
+}
 
 const block::BlockStyle* styleOf(const block::Block& blk) {
     if (const auto* p = std::get_if<block::ParagraphBlock>(&blk)) return &p->block;
@@ -70,6 +103,7 @@ const block::BlockStyle* styleOf(const block::Block& blk) {
     if (const auto* li = std::get_if<block::ListBlock>(&blk)) return &li->block;
     if (const auto* tc = std::get_if<block::TocBlock>(&blk)) return &tc->block;
     if (const auto* ob = std::get_if<block::ObjectBlock>(&blk)) return &ob->block;
+    if (const auto* ix = std::get_if<block::IndexBlock>(&blk)) return &ix->block;
     return nullptr;
 }
 
@@ -109,6 +143,14 @@ void trimRegionStart(Region& r, Pt d) {
 /**
  * パス間で受け渡す情報（番号・ページ・見出し一覧）
  */
+/// 索引の項目（キーは 正規化した読み + '\x1f' + 用語）
+struct IndexEntry {
+    std::u16string reading;
+    std::u16string term;
+    std::set<int> pages;
+    bool operator==(const IndexEntry& o) const { return reading == o.reading && term == o.term && pages == o.pages; }
+};
+
 struct RefInfo {
     std::map<std::u16string, std::u16string> fields;   ///< "ref:label" / "page:label" → 文字列
     struct Heading {
@@ -117,10 +159,12 @@ struct RefInfo {
         int page = 0;
     };
     std::vector<Heading> headings;
+    std::map<std::u16string, IndexEntry> index;
     int totalPages = 0;
 
     bool operator==(const RefInfo& o) const {
         if (fields != o.fields || totalPages != o.totalPages || headings.size() != o.headings.size()) return false;
+        if (index != o.index) return false;
         for (size_t i = 0; i < headings.size(); ++i) {
             if (headings[i].title != o.headings[i].title || headings[i].level != o.headings[i].level ||
                 headings[i].page != o.headings[i].page) return false;
@@ -155,7 +199,7 @@ private:
     const FlowLayoutOptions& opts_;
     const RefInfo* prev_;
     std::map<std::u16string, std::u16string> fields_;
-    RefInfo collected_;
+    mutable RefInfo collected_;   ///< resolved() が索引を記録するので mutable
 
     int columns_;
     Pt columnGap_;
@@ -184,10 +228,11 @@ private:
         int footnoteCount = 0;
         size_t collectedHeadings = 0;
         std::map<std::u16string, std::u16string> collectedFields;
+        std::map<std::u16string, IndexEntry> collectedIndex;
     };
     NumberingState snapshotNumbering() const {
         return NumberingState{headingCounters_, figureCount_, tableCount_, equationCount_, footnoteCount_,
-                              collected_.headings.size(), collected_.fields};
+                              collected_.headings.size(), collected_.fields, collected_.index};
     }
     void restoreNumbering(const NumberingState& s) {
         headingCounters_ = s.headingCounters;
@@ -197,6 +242,7 @@ private:
         footnoteCount_ = s.footnoteCount;
         collected_.headings.resize(std::min(s.collectedHeadings, collected_.headings.size()));
         collected_.fields = s.collectedFields;
+        collected_.index = s.collectedIndex;
     }
 
     /// keepWithNext で保留中のブロック（この段に置いたが、次が入らなければ一緒に移す）
@@ -250,8 +296,44 @@ private:
 
     inl::Paragraph resolved(const inl::Paragraph& p) const {
         inl::Paragraph r = hasPlaceholder(p) ? substitute(p, fields_) : p;
+        if (hasPlaceholder(r)) collectIndexMarkers(r);
         resolveObjects(r);
         return r;
+    }
+
+    /// `{index:用語}` / `{index:よみ|用語}` を本文から取り除き、いまのページで索引に記録する
+    void collectIndexMarkers(inl::Paragraph& p) const {
+        const int pageNo = pages_.empty() ? 1 : pages_.back().number;
+        size_t base = 0;   // この run の段落内での開始位置
+        for (inl::InlineRun& run : p.runs) {
+            std::u16string& t = run.text;
+            if (run.literal) { base += t.size(); continue; }
+            size_t pos = 0;
+            while ((pos = t.find(u"{index:", pos)) != std::u16string::npos) {
+                const size_t close = t.find(u'}', pos);
+                if (close == std::u16string::npos) break;
+                std::u16string body = t.substr(pos + 7, close - pos - 7);
+                std::u16string reading, term;
+                const size_t bar = body.find(u'|');
+                if (bar != std::u16string::npos) { reading = body.substr(0, bar); term = body.substr(bar + 1); }
+                else { reading = body; term = body; }
+                if (!term.empty()) {
+                    const std::u16string key = normalizeReading(reading) + u'\x1f' + term;
+                    IndexEntry& e = collected_.index[key];
+                    e.reading = normalizeReading(reading);
+                    e.term = term;
+                    if (!trial_) e.pages.insert(pageNo);
+                }
+                const size_t len = close - pos + 1;
+                t.erase(pos, len);
+                // 後ろの注記（ルビ等）の位置を詰める
+                for (inl::Annotation& a : p.annotations) {
+                    if (a.start >= base + pos + len) { a.start -= len; a.end -= len; }
+                    else if (a.end > base + pos) a.end = std::max(a.start, a.end - std::min(len, a.end - (base + pos)));
+                }
+            }
+            base += t.size();
+        }
     }
 
     /// 行内オブジェクトの参照（objectRef）をハンドラで解決する。ハンドラが無い／失敗なら代替テキスト
@@ -298,6 +380,7 @@ private:
     void placeHeading(const block::HeadingBlock& h, const PageStart* resume);
     void placeList(const block::ListBlock& list, const PageStart* resume);
     void placeToc(const block::TocBlock& toc, const PageStart* resume);
+    void placeIndex(const block::IndexBlock& idx, const PageStart* resume);
     void placeRule(const block::RuleBlock& r);
     void placeImage(const block::ImageBlock& img);
     void placeObject(const block::ObjectBlock& ob);
@@ -627,6 +710,8 @@ void Flower::placeContent(const block::Block& blk, const block::BlockStyle& styl
         placeList(*li, resume);
     } else if (const auto* tc = std::get_if<block::TocBlock>(&blk)) {
         placeToc(*tc, resume);
+    } else if (const auto* ix = std::get_if<block::IndexBlock>(&blk)) {
+        placeIndex(*ix, resume);
     }
 }
 
@@ -806,6 +891,105 @@ void Flower::placeToc(const block::TocBlock& toc, const PageStart* resume) {
         pageHasContent_ = true;
     }
     applySpaceAfter(toc.block.spaceAfter);
+    pending_.reset();
+}
+
+//------------------------------------------------------------------------------
+// 索引
+//------------------------------------------------------------------------------
+
+void Flower::placeIndex(const block::IndexBlock& idx, const PageStart* resume) {
+    ensureRegion();
+    if (!prev_) return;   // 最初のパスでは項目がまだ分からない
+    if (!resume) applySpaceBefore(idx.block.spaceBefore);
+
+    const TextStyle& st = idx.style;
+    TextStyle gst = idx.groupStyle ? *idx.groupStyle : idx.style;
+    if (!idx.groupStyle) gst.font.weight = std::max(gst.font.weight, 600);
+
+    // ページ番号欄の幅は最長の番号列で決める
+    Pt numberWidth = 0.0f;
+    for (const auto& kv : prev_->index) {
+        std::u16string pages;
+        for (int pg : kv.second.pages) { if (!pages.empty()) pages += idx.pageSeparator; pages += toU16(pg); }
+        Pt w = 0.0f;
+        measureParagraph(inl::Paragraph::plain(pages, st), 1.0e6f, &w);
+        numberWidth = std::max(numberWidth, w);
+    }
+    const Pt gap = st.size;
+
+    std::u16string currentGroup;
+    int i = 0;
+    const int start = resume ? resume->paraIndex : 0;
+    for (const auto& kv : prev_->index) {
+        const IndexEntry& e = kv.second;
+        if (i++ < start) continue;
+        curParaIndex_ = i - 1;
+        curCharStart_ = 0;
+        const Pt L = region().lineLength();
+
+        // 見出し文字（あ・か・さ…）
+        if (idx.grouped) {
+            const std::u16string g = indexGroup(e.reading);
+            if (g != currentGroup) {
+                currentGroup = g;
+                inl::Paragraph gp = inl::Paragraph::plain(g, gst);
+                gp.style.align = Align::Start;
+                gp.style.firstLineIndent = 0.0f;
+                gp.style.lineHeight = idx.lineHeight;
+                const Pt need = measureParagraph(gp, L) + measureParagraph(inl::Paragraph::plain(e.term, st), L);
+                if (region().remaining() + kEps < need && !region().fresh()) {
+                    nextRegion();
+                    if (aborted()) return;
+                }
+                Region& reg = region();
+                const Pt spaceBefore = (reg.fresh() ? 0.0f : st.size * 0.6f);
+                reg.used += spaceBefore;
+                reg.used += placeParagraphAt(gp, 0.0f, 0.0f, L);
+            }
+        }
+
+        inl::Paragraph title = inl::Paragraph::plain(e.term, st);
+        title.style.align = Align::Start;
+        title.style.firstLineIndent = 0.0f;
+        title.style.lineHeight = idx.lineHeight;
+        const Pt indent = st.size;
+        const Pt titleLen = std::max(1.0f, L - indent - numberWidth - gap);
+        const Pt need = measureParagraph(title, titleLen);
+        if (region().remaining() + kEps < need && !region().fresh()) {
+            nextRegion();
+            if (aborted()) return;
+            currentGroup.clear();   // 段が変わったら見出し文字を出し直す
+        }
+        Region& reg = region();
+        inl::ParagraphFragment frag;
+        const Pt used = placeParagraphAt(title, 0.0f, indent, titleLen, std::nullopt, &frag);
+        if (frag.lines.empty()) continue;
+        const Pt pitch = frag.linePitch;
+        const Pt lastLineOffset = frag.lineCenterOffset(frag.lines.size() - 1);
+
+        std::u16string pages;
+        for (int pg : e.pages) { if (!pages.empty()) pages += idx.pageSeparator; pages += toU16(pg); }
+        inl::Paragraph num = inl::Paragraph::plain(pages, st);
+        num.style.align = Align::End;
+        num.style.firstLineIndent = 0.0f;
+        num.style.lineHeight = idx.lineHeight;
+        placeParagraphAt(num, lastLineOffset, 0.0f, L);
+
+        if (idx.leader) {
+            const inl::LineBox& last = frag.lines.back();
+            const Pt from = indent + last.indent + last.naturalLength + st.size * 0.5f;
+            const Pt to = L - numberWidth - st.size * 0.3f;
+            const Pt dot = 0.9f;
+            const Pt center = reg.used + lastLineOffset + pitch * 0.5f + st.size * 0.3f;
+            for (Pt x = from; x + dot <= to; x += 3.0f) {
+                fillLogicalRect(x, x + dot, center - dot * 0.5f, center + dot * 0.5f, st.fill);
+            }
+        }
+        reg.used += used;
+        pageHasContent_ = true;
+    }
+    applySpaceAfter(idx.block.spaceAfter);
     pending_.reset();
 }
 
@@ -1878,7 +2062,7 @@ std::vector<Page> FlowLayouter::layout(const block::Flow& flow, const PageSequen
     uses(seq.master.header);
     uses(seq.master.footer);
     for (const block::Block& blk : flow.blocks) {
-        if (std::get_if<block::TocBlock>(&blk)) multiPass = true;
+        if (std::get_if<block::TocBlock>(&blk) || std::get_if<block::IndexBlock>(&blk)) multiPass = true;
         const block::BlockStyle* st = styleOf(blk);
         if (st && !st->label.empty()) multiPass = true;
     }
