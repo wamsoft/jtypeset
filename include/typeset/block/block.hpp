@@ -1,6 +1,7 @@
 #ifndef TYPESET_BLOCK_BLOCK_HPP
 #define TYPESET_BLOCK_BLOCK_HPP
 
+#include <map>
 #include <optional>
 #include <variant>
 #include <vector>
@@ -116,6 +117,25 @@ struct ImageBlock {
 };
 
 /**
+ * 外部ハンドラで生成するオブジェクトのブロック（別行立ての数式・グラフなど）
+ *
+ * 組版時に obj::ObjectRegistry のハンドラを呼び、返った箱を行方向に揃えて置く。段より大きければ縮める。
+ * numbered なら式番号（FlowLayoutOptions::equationFormat）を行末に置き、label で `{ref:label}` から参照できる。
+ * caption の `{eq}` も式番号になる。textStyle は式番号・代替テキストの書体で、fontSize の基準にもなる。
+ */
+struct ObjectBlock {
+    std::string handler;
+    std::u16string source;
+    std::map<std::string, std::string> params;
+    Align align = Align::Center;
+    bool numbered = false;
+    TextStyle textStyle;
+    std::optional<inl::Paragraph> caption;
+    Pt captionGap = 3.0f;
+    BlockStyle block;
+};
+
+/**
  * 表 — TeX の tabular 水準（列幅指定／自動、罫線、colspan、ヘッダ行の繰り返し、ページまたぎ）
  *
  * 列は行の方向（inline）に並び、行は行送り方向（block）に進む。縦組みでは列が上下、行が右→左。
@@ -191,7 +211,7 @@ struct TocBlock {
 };
 
 using Block = std::variant<ParagraphBlock, HeadingBlock, RuleBlock, SpacerBlock, LabeledBlock,
-                           SectionBlock, ImageBlock, TableBlock, ListBlock, TocBlock>;
+                           SectionBlock, ImageBlock, TableBlock, ListBlock, TocBlock, ObjectBlock>;
 
 struct Flow {
     std::vector<Block> blocks;
@@ -230,6 +250,19 @@ struct Flow {
     }
     void addSpacer(Pt size) { blocks.push_back(SpacerBlock{size, {}}); }
     void addImage(ImageBlock img) { blocks.push_back(std::move(img)); }
+    void addObject(ObjectBlock obj) { blocks.push_back(std::move(obj)); }
+    void addObject(std::string handler, std::u16string source, TextStyle textStyle,
+                   std::map<std::string, std::string> params = {}, bool numbered = false,
+                   BlockStyle style = {}) {
+        ObjectBlock o;
+        o.handler = std::move(handler);
+        o.source = std::move(source);
+        o.params = std::move(params);
+        o.textStyle = std::move(textStyle);
+        o.numbered = numbered;
+        o.block = std::move(style);
+        blocks.push_back(std::move(o));
+    }
     void addTable(TableBlock table) { blocks.push_back(std::move(table)); }
     void addPageBreak() {
         SpacerBlock s;

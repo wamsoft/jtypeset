@@ -51,6 +51,10 @@ backend/   raster             glyphware のカバレッジマスク＋自前合�
            pdf_writer         Identity-H でグリフ ID 直書き、hb-subset でサブセット化、Flate 圧縮、画像 XObject
            svg_writer         グリフは <defs>+<use>、画像は data URI
 image/     stb_image 読み込み、PNG エンコード、base64
+obj/       ObjectRegistry     外部オブジェクト（数式・グラフ）の差し込み口。関数ハンドラ／外部コマンド（JSON → SVG）を登録し、
+                              (ハンドラ, ソース, パラメータ, サイズ) でキャッシュ。本体は数式の知識を持たない
+           svg_import         SVG サブセット → dl（path 全コマンド・基本図形・defs/use・transform・塗り線）。
+                              ベースラインは <!-- typeset baseline="pt" --> か vertical-align(ex)
 python/    pybind11 モジュール（psdparse と同じ構成）
 ```
 

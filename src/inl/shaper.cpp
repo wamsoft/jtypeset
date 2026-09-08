@@ -109,6 +109,47 @@ ShapedText shapeText(const std::u16string& text, const std::vector<StyleRun>& ru
     for (const Segment& seg : segs) {
         const TextStyle& style = (*ctx.styles)[seg.styleIndex];
 
+        // 行内オブジェクト（数式など）: 1 クラスタの箱。横組みはベースラインを本文に揃え、縦組みは横倒しで中心へ
+        if (ctx.objects && seg.styleIndex < ctx.objects->size() && (*ctx.objects)[seg.styleIndex] &&
+            (*ctx.objects)[seg.styleIndex]->ok()) {
+            const std::shared_ptr<const obj::ObjectResult>& ob = (*ctx.objects)[seg.styleIndex];
+            const Pt adv = ob->size.w;      // 縦組みでも横倒しなので幅が送り
+            const Pt h = ob->size.h;
+            Pt top = -h * 0.5f;
+            if (!vertical && ob->hasBaseline) {
+                std::shared_ptr<glyphware::Face> primary = ctx.fonts.primary(style.font);
+                if (primary) top = baselineOffset(*primary, style.size, ctx.writingMode) - ob->baseline;
+            }
+
+            ShapedCluster sc;
+            sc.glyphStart = static_cast<uint32_t>(result.glyphs.size());
+            sc.glyphCount = 1;
+            sc.charStart = seg.start;
+            sc.charEnd = seg.end;
+            sc.origin = pen;
+            sc.advance = adv;
+            sc.upright = true;
+            sc.styleIndex = seg.styleIndex;
+            sc.charClass = text::CharClass::Ideographic;
+            sc.object = true;
+
+            PlacedGlyph g;
+            g.object = ob;
+            g.inline_ = pen;
+            g.block = top;
+            g.advance = adv;
+            g.size = style.size;
+            g.charIndex = static_cast<uint32_t>(seg.start);
+            g.styleIndex = seg.styleIndex;
+            result.glyphs.push_back(std::move(g));
+            result.clusters.push_back(sc);
+            pen += adv;
+            blockMin = std::min(blockMin, top);
+            blockMax = std::max(blockMax, top + h);
+            haveExtent = true;
+            continue;
+        }
+
         // 行内画像: 1 クラスタの箱として置く（中心を行の中心線へ）
         if (ctx.images && seg.styleIndex < ctx.images->size() && (*ctx.images)[seg.styleIndex]) {
             const std::shared_ptr<const dl::Image>& img = (*ctx.images)[seg.styleIndex];

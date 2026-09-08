@@ -11,6 +11,19 @@
 
 namespace typeset::inl {
 
+dl::Group objectGroup(const obj::ObjectResult& ob, const Rect& box, bool sideways) {
+    dl::Group grp;
+    if (!sideways) {
+        grp.xform = Matrix::translation(box.x, box.y);
+    } else {
+        // 時計回りに 90°: ローカル (x, y) → (box.right − y, box.y + x)
+        grp.xform.xx = 0.0f; grp.xform.xy = -1.0f; grp.xform.dx = box.right();
+        grp.xform.yx = 1.0f; grp.xform.yy = 0.0f;  grp.xform.dy = box.y;
+    }
+    grp.children = ob.items;
+    return grp;
+}
+
 std::u16string Paragraph::text() const {
     std::u16string t;
     for (const InlineRun& r : runs) t += r.text;
@@ -59,10 +72,12 @@ ParagraphFragment ParagraphLayouter::layout(const Paragraph& para, WritingMode w
     ParagraphFragment frag;
     std::vector<std::shared_ptr<const dl::Image>> images;
     std::vector<Size> imageSizes;
+    std::vector<std::shared_ptr<const obj::ObjectResult>> objects;
     for (const InlineRun& r : para.runs) {
         frag.styles.push_back(r.style);
         images.push_back(r.image);
         imageSizes.push_back(r.imageSize);
+        objects.push_back(r.object);
     }
     if (frag.styles.empty()) frag.styles.push_back(TextStyle{});
 
@@ -130,7 +145,7 @@ ParagraphFragment ParagraphLayouter::layout(const Paragraph& para, WritingMode w
             const std::vector<StyleRun> runs = clipRuns(allRuns, pos, trimmed);
             const std::vector<Annotation> anns = clipAnnotations(para.annotations, pos, trimmed);
 
-            ShapeContext sctx{fonts_, wm, para.style.orientation, &frag.styles, &images, &imageSizes};
+            ShapeContext sctx{fonts_, wm, para.style.orientation, &frag.styles, &images, &imageSizes, &objects};
             const ShapedText shaped = shapeText(sub, runs, sctx);
 
             ItemBuildContext ictx{fonts_, wm, para.style.orientation, &frag.styles, &base,
@@ -250,6 +265,17 @@ void emitParagraph(dl::DisplayList& out, const ParagraphFragment& frag, WritingM
         };
 
         for (const PlacedGlyph& g : line.glyphs) {
+            if (g.object) {
+                // 行内オブジェクト: 論理の箱 [inline_, inline_+w] × [block, block+h] に置く。縦組みは横倒し
+                flush();
+                const Size sz = g.object->size;
+                const Point p0 = toPhysical(wm, LogicalPoint{g.inline_, g.block}, lo);
+                const Point p1 = toPhysical(wm, LogicalPoint{g.inline_ + sz.w, g.block + sz.h}, lo);
+                const Rect box{std::min(p0.x, p1.x), std::min(p0.y, p1.y),
+                               std::fabs(p1.x - p0.x), std::fabs(p1.y - p0.y)};
+                out.add(objectGroup(*g.object, box, isVertical(wm)));
+                continue;
+            }
             if (g.image) {
                 // 行内画像: 中心を (inline_ + adv/2, block) に置く
                 flush();

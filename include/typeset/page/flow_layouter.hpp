@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "typeset/block/block.hpp"
+#include "typeset/obj/object.hpp"
 #include "typeset/font/font_set.hpp"
 #include "typeset/page/page.hpp"
 
@@ -34,6 +35,10 @@ struct FlowLayoutOptions {
     /// 図番号・表番号の書式（`{n}` が番号）
     std::u16string figureFormat = u"図 {n}";
     std::u16string tableFormat = u"表 {n}";
+    /// 式番号の書式
+    std::u16string equationFormat = u"({n})";
+    /// 外部オブジェクト（数式など）のハンドラ。null なら ObjectBlock / 行内オブジェクトは代替テキストになる
+    obj::ObjectRegistry* objects = nullptr;
 };
 
 class FlowLayouter {

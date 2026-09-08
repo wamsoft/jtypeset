@@ -1,7 +1,9 @@
 #ifndef TYPESET_INL_PARAGRAPH_HPP
 #define TYPESET_INL_PARAGRAPH_HPP
 
+#include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -25,12 +27,21 @@
  */
 namespace typeset::inl {
 
-/// スタイルの付いたテキスト片。image が付いていれば行内画像（text は U+FFFC 1 文字）
+/// 外部ハンドラで生成するオブジェクトの指定（組版時に obj::ObjectRegistry で解決する）
+struct ObjectRef {
+    std::string handler;
+    std::u16string source;
+    std::map<std::string, std::string> params;
+};
+
+/// スタイルの付いたテキスト片。image / object / objectRef が付いていれば行内オブジェクト（text は U+FFFC 1 文字）
 struct InlineRun {
     std::u16string text;
     TextStyle style;
     std::shared_ptr<const dl::Image> image;
     Size imageSize;         ///< pt。0 なら画素数を 72dpi として使い、片方 0 なら縦横比を保つ
+    std::shared_ptr<const obj::ObjectResult> object;    ///< 解決済みのオブジェクト
+    std::optional<ObjectRef> objectRef;                 ///< 未解決（FlowLayouter が解決する）
 };
 
 struct Paragraph {
@@ -58,7 +69,28 @@ struct Paragraph {
         r.imageSize = size;
         runs.push_back(std::move(r));
     }
+
+    /// 外部ハンドラのオブジェクト（数式など）を行内に足す。style は周囲の本文（サイズの基準・ベースライン）
+    void addObject(std::string handler, std::u16string source, std::map<std::string, std::string> params,
+                   TextStyle style) {
+        InlineRun r;
+        r.text = u"\uFFFC";
+        r.style = std::move(style);
+        r.objectRef = ObjectRef{std::move(handler), std::move(source), std::move(params)};
+        runs.push_back(std::move(r));
+    }
+    /// 解決済みのオブジェクトを行内に足す
+    void addObject(std::shared_ptr<const obj::ObjectResult> object, TextStyle style) {
+        InlineRun r;
+        r.text = u"\uFFFC";
+        r.style = std::move(style);
+        r.object = std::move(object);
+        runs.push_back(std::move(r));
+    }
 };
+
+/// オブジェクトの描画命令を物理矩形 box に置く Group を作る（sideways: 時計回り 90° で横倒し）
+dl::Group objectGroup(const obj::ObjectResult& ob, const Rect& box, bool sideways);
 
 /**
  * 確定した 1 行（論理座標）

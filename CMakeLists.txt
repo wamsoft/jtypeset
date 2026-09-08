@@ -42,6 +42,8 @@ set(TYPESET_SOURCES
     src/font/font_set.cpp
     src/dl/display_list.cpp
     src/image/image.cpp
+    src/obj/object.cpp
+    src/obj/svg_import.cpp
     # text: Unicode / JLReq のテーブル
     src/text/utf.cpp
     src/text/char_class.cpp
@@ -110,6 +112,9 @@ if(TYPESET_BUILD_SAMPLES)
 
     add_executable(sample_tech samples/sample_tech.cpp)
     target_link_libraries(sample_tech PRIVATE typeset)
+
+    add_executable(sample_objects samples/sample_objects.cpp)
+    target_link_libraries(sample_objects PRIVATE typeset)
 
     add_executable(sample_report samples/sample_report.cpp)
     target_link_libraries(sample_report PRIVATE typeset)

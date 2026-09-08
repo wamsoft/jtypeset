@@ -7,6 +7,7 @@ add_executable(typeset_tests
     test_inline.cpp
     test_page.cpp
     test_flow3.cpp
+    test_obj.cpp
 )
 target_link_libraries(typeset_tests PRIVATE typeset doctest::doctest)
 target_include_directories(typeset_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)

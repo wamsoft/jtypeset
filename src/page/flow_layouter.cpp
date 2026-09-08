@@ -69,6 +69,7 @@ const block::BlockStyle* styleOf(const block::Block& blk) {
     if (const auto* t = std::get_if<block::TableBlock>(&blk)) return &t->block;
     if (const auto* li = std::get_if<block::ListBlock>(&blk)) return &li->block;
     if (const auto* tc = std::get_if<block::TocBlock>(&blk)) return &tc->block;
+    if (const auto* ob = std::get_if<block::ObjectBlock>(&blk)) return &ob->block;
     return nullptr;
 }
 
@@ -171,23 +172,26 @@ private:
     std::vector<int> headingCounters_;
     int figureCount_ = 0;
     int tableCount_ = 0;
+    int equationCount_ = 0;
 
     /// ブロックを置く前の採番・収集の状態（巻き戻し用）
     struct NumberingState {
         std::vector<int> headingCounters;
         int figureCount = 0;
         int tableCount = 0;
+        int equationCount = 0;
         size_t collectedHeadings = 0;
         std::map<std::u16string, std::u16string> collectedFields;
     };
     NumberingState snapshotNumbering() const {
-        return NumberingState{headingCounters_, figureCount_, tableCount_, collected_.headings.size(),
-                              collected_.fields};
+        return NumberingState{headingCounters_, figureCount_, tableCount_, equationCount_,
+                              collected_.headings.size(), collected_.fields};
     }
     void restoreNumbering(const NumberingState& s) {
         headingCounters_ = s.headingCounters;
         figureCount_ = s.figureCount;
         tableCount_ = s.tableCount;
+        equationCount_ = s.equationCount;
         collected_.headings.resize(std::min(s.collectedHeadings, collected_.headings.size()));
         collected_.fields = s.collectedFields;
     }
@@ -234,7 +238,33 @@ private:
     bool aborted() const { return trialOverflow_; }
 
     inl::Paragraph resolved(const inl::Paragraph& p) const {
-        return hasPlaceholder(p) ? substitute(p, fields_) : p;
+        inl::Paragraph r = hasPlaceholder(p) ? substitute(p, fields_) : p;
+        resolveObjects(r);
+        return r;
+    }
+
+    /// 行内オブジェクトの参照（objectRef）をハンドラで解決する。ハンドラが無い／失敗なら代替テキスト
+    void resolveObjects(inl::Paragraph& p) const {
+        for (inl::InlineRun& r : p.runs) {
+            if (!r.objectRef || r.object) continue;
+            std::shared_ptr<const obj::ObjectResult> res;
+            if (opts_.objects) {
+                obj::ObjectRequest req;
+                req.handler = r.objectRef->handler;
+                req.source = r.objectRef->source;
+                req.params = r.objectRef->params;
+                req.maxInline = regions_.empty() ? 0.0f : regions_[regionIndex_].lineLength();
+                req.fontSize = r.style.size;
+                req.writingMode = wm();
+                req.inlineContext = true;
+                res = opts_.objects->render(req);
+            }
+            if (res && res->ok()) {
+                r.object = res;
+            } else {
+                r.text = u"[" + toU16(r.objectRef->handler) + u"]";
+            }
+        }
     }
 
     /// 現ページの段に内容が無い（巻き戻しで空になった等）
@@ -259,6 +289,7 @@ private:
     void placeToc(const block::TocBlock& toc, const PageStart* resume);
     void placeRule(const block::RuleBlock& r);
     void placeImage(const block::ImageBlock& img);
+    void placeObject(const block::ObjectBlock& ob);
     void placeTable(const block::TableBlock& table);
     void placeSpanning(const block::Block& blk, const block::BlockStyle& style);
     void balanceColumns(size_t endBlock);
@@ -545,6 +576,8 @@ void Flower::placeContent(const block::Block& blk, const block::BlockStyle& styl
         applySpaceAfter(style.spaceAfter);
     } else if (const auto* img = std::get_if<block::ImageBlock>(&blk)) {
         placeImage(*img);
+    } else if (const auto* ob = std::get_if<block::ObjectBlock>(&blk)) {
+        placeObject(*ob);
     } else if (const auto* t = std::get_if<block::TableBlock>(&blk)) {
         placeTable(*t);
     } else if (const auto* li = std::get_if<block::ListBlock>(&blk)) {
@@ -970,6 +1003,117 @@ void Flower::placeImage(const block::ImageBlock& img) {
                                                                               : in0 + inlineExtent();
         reg.exclusions.push_back(reg.toRect(exIn0, exIn1, reg.used, reg.used + total + img.gap));
     }
+}
+
+//------------------------------------------------------------------------------
+// 外部オブジェクト（別行立ての数式など）
+//------------------------------------------------------------------------------
+
+void Flower::placeObject(const block::ObjectBlock& ob) {
+    ensureRegion();
+    applySpaceBefore(ob.block.spaceBefore);
+    const bool vertical = isVertical(wm());
+
+    // 式番号（採番はハンドラの成否に関わらず進める: 参照が安定するように）。
+    // {ref:label} は書式込みの番号「(1)」になる（「式 (1)」と書けるように）
+    std::u16string number;
+    std::optional<inl::Paragraph> numberPara;
+    if (ob.numbered) {
+        ++equationCount_;
+        number = substitute(inl::Paragraph::plain(opts_.equationFormat, TextStyle{}),
+                            {{u"n", toU16(equationCount_)}}).text();
+        numberPara = inl::Paragraph::plain(number, ob.textStyle);
+        numberPara->style.align = Align::End;
+    }
+    std::optional<inl::Paragraph> caption;
+    if (ob.caption) {
+        std::map<std::u16string, std::u16string> f = fields_;
+        f[u"eq"] = number;
+        caption = substitute(*ob.caption, f);
+    }
+
+    // ハンドラを呼ぶ
+    std::shared_ptr<const obj::ObjectResult> res;
+    {
+        obj::ObjectRequest req;
+        req.handler = ob.handler;
+        req.source = ob.source;
+        req.params = ob.params;
+        req.maxInline = region().lineLength();
+        req.maxBlock = region().blockExtent();
+        req.fontSize = ob.textStyle.size;
+        req.writingMode = wm();
+        req.inlineContext = false;
+        if (opts_.objects) res = opts_.objects->render(req);
+    }
+    if (!res || !res->ok()) {
+        // 代替テキストを段落として置く
+        const std::u16string msg = u"[" + toU16(ob.handler) + u": " +
+                                   toU16(res ? res->error : std::string("no handler")) + u"]";
+        inl::Paragraph alt = inl::Paragraph::plain(msg, ob.textStyle);
+        alt.style.align = Align::Start;
+        block::BlockStyle st = ob.block;
+        st.spaceBefore = 0.0f;
+        flowParagraph(alt, st, nullptr, 0.0f, 0.0f, true, 0, false);
+        if (!trial_) recordLabel(ob.block.label, number);
+        return;
+    }
+
+    // 論理の箱（縦組みは横倒しなので幅が行方向）
+    Pt inlineExtent = res->size.w, blockExtent = res->size.h;
+    Pt numberWidth = 0.0f;
+    if (numberPara) {
+        Pt natural = 0.0f;
+        inl::Paragraph probe = *numberPara;
+        probe.style.align = Align::Start;              // 自然長を測る（End 揃えだと字下げが載る）
+        measureParagraph(probe, region().lineLength(), &natural);
+        numberWidth = natural + ob.textStyle.size;     // 番号と式の間に 1 字あける
+    }
+    float scale = 1.0f;
+    {
+        const Region& reg = region();
+        const Pt avail = std::max(1.0f, reg.lineLength() - numberWidth * 2.0f);
+        scale = std::min(1.0f, std::min(avail / std::max(1.0f, inlineExtent),
+                                        reg.blockExtent() / std::max(1.0f, blockExtent)));
+        inlineExtent *= scale;
+        blockExtent *= scale;
+    }
+    Pt captionExtent = 0.0f;
+    if (caption) captionExtent = ob.captionGap + measureParagraph(*caption, region().lineLength());
+    const Pt total = blockExtent + captionExtent;
+
+    if (region().remaining() + kEps < total && !region().fresh()) {
+        nextRegion();
+        if (aborted()) return;
+    }
+    Region& reg = region();
+    const Pt L = reg.lineLength();
+    Pt in0 = 0.0f;
+    if (ob.align == Align::Center) in0 = (L - inlineExtent) * 0.5f;
+    else if (ob.align == Align::End) in0 = L - inlineExtent - numberWidth;
+    in0 = std::max(0.0f, in0);
+
+    const Rect box = reg.toRect(in0, in0 + inlineExtent, reg.used, reg.used + blockExtent);
+    dl::Group grp = inl::objectGroup(*res, box, vertical);
+    if (scale < 1.0f) grp.xform = multiply(grp.xform, Matrix::scaling(scale, scale));
+    page().dl.add(std::move(grp));
+
+    if (numberPara) {
+        // 式の行送り方向の中央に番号の行の中心を合わせて、行末へ
+        const Pt ext = measureParagraph(*numberPara, L);
+        placeParagraphAt(*numberPara, std::max(0.0f, (blockExtent - ext) * 0.5f), 0.0f, L, Align::End);
+    }
+    if (caption) {
+        placeParagraphAt(*caption, blockExtent + ob.captionGap, 0.0f, L,
+                         caption->style.align == Align::Justify ? std::optional<Align>(Align::Center)
+                                                                : std::nullopt);
+    }
+    if (!trial_) recordLabel(ob.block.label, number);
+
+    pageHasContent_ = true;
+    pending_.reset();
+    reg.used += total;
+    applySpaceAfter(ob.block.spaceAfter);
 }
 
 //------------------------------------------------------------------------------

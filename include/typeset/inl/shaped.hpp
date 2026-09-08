@@ -9,6 +9,7 @@
 #include <glyphware/Face.h>
 
 #include "typeset/dl/display_list.hpp"
+#include "typeset/obj/object.hpp"
 #include "typeset/geom.hpp"
 #include "typeset/style.hpp"
 #include "typeset/text/char_class.hpp"
@@ -40,6 +41,9 @@ struct PlacedGlyph {
     /// 行内画像（グリフではなく画像を置く）。block は画像中心の中心線からのずれ
     std::shared_ptr<const dl::Image> image;
     Size imageSize;
+    /// 行内オブジェクト（数式など）。block はオブジェクトの行送り方向の始端（横組み: 上端）の中心線からのずれ。
+    /// 縦組みでは横倒し（時計回りに 90°）で置く
+    std::shared_ptr<const obj::ObjectResult> object;
 };
 
 /**

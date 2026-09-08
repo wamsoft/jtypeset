@@ -32,6 +32,8 @@ struct ShapeContext {
     /// styleIndex → 行内画像（無い run は nullptr）
     const std::vector<std::shared_ptr<const dl::Image>>* images = nullptr;
     const std::vector<Size>* imageSizes = nullptr;
+    /// styleIndex → 行内オブジェクト（無い run は nullptr）
+    const std::vector<std::shared_ptr<const obj::ObjectResult>>* objects = nullptr;
 };
 
 /**

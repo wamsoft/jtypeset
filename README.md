@@ -37,6 +37,7 @@ Document / Flow（段落・見出し・ラベル付き段落・画像・表・�
   → inl    : Itemizer → HarfBuzz → Box/Glue/Penalty（JLReq）→ 行分割（Greedy / Knuth–Plass）→ LineBox
   → dl     : 表示リスト（GlyphRun / Path / Rect / Image / Group）
   → backend: ラスタ（glyphware マスク合成）/ PDF（Identity-H、グリフ ID 直書き）/ SVG（defs + use）
+  obj      : 外部オブジェクト（数式・グラフ）の差し込み口。ハンドラ登録（関数／外部コマンド）と SVG 読み込み
 ```
 
 ## ビルド
@@ -54,6 +55,7 @@ make test
 ./build/x64-windows/Release/sample_novel.exe    # 小説（B6 縦組み 2 段、章見出し、ルビ）
 ./build/x64-windows/Release/sample_tech.exe     # 技術文書（A4 横組み、回り込みの図、表、2 段組）
 ./build/x64-windows/Release/sample_report.exe   # レポート（目次、見出し採番、図表番号と相互参照、箇条書き、コード、しおり）
+./build/x64-windows/Release/sample_objects.exe  # 外部オブジェクト（関数ハンドラの分数、外部コマンドのグラフ、SVG、式番号）
 ```
 
 ## できること（2026-09 時点）
@@ -64,6 +66,9 @@ make test
 - 画像（配置・回り込み・キャプション）、表（自動列幅、colspan / rowspan、セルの縦位置、ヘッダ繰り返し、段より高い行の分割）
 - ページマスタ（判型・内外余白・段組・柱・ノンブル）、改ページ制御（orphans / widows / keepWithNext / keepTogether）、
   段の途中の段抜きと最終ページの段揃え、目次、図表番号と相互参照（`{ref:label}` `{page:label}`）
+- 外部オブジェクトの差し込み: 本文に「ハンドラ名＋ソース」を書き、登録した関数／外部コマンドが返す SVG や描画命令を
+  行内（ベースライン揃え）・別行立て（式番号・`{ref:}` 参照）に置く。数式レンダラ（MathJax / dvisvgm / Typst / MicroTeX）や
+  グラフ（matplotlib）を本体に依存を足さずにつなげる
 - 出力: ラスタ（PNG）、PDF（Identity-H・hb-subset・Flate・画像・しおり）、SVG。Python バインディング
 
 ## Python
@@ -73,6 +78,7 @@ pip install pybind11
 make prebuild GLYPHWARE_DIR=d:/work/kirikiri/glyphware CMAKEOPT=-DTYPESET_BUILD_PYTHON=ON
 make build
 python python/examples/script.py     # build/x64-windows/python/Release の typeset.pyd を読む
+python python/examples/objects.py    # Python 関数／外部コマンドをオブジェクトのハンドラとして登録する例
 ```
 
 ```python
