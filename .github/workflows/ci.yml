@@ -47,6 +47,13 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install ninja -y
 
+      # preset は Ninja + cl なので MSVC の環境変数（vcvars）が要る
+      - name: MSVC environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - uses: lukka/run-vcpkg@v11
         with:
           vcpkgDirectory: ${{ github.workspace }}/vcpkg

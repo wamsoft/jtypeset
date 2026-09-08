@@ -10,7 +10,8 @@
       "features": [
         "png",
         "zlib"
-      ]
+      ],
+      "default-features": false
     },
     "harfbuzz",
     "libunibreak",
