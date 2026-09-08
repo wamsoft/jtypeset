@@ -42,6 +42,18 @@ FONTS = [
         "https://github.com/notofonts/noto-cjk/releases/download/Serif2.003/07_NotoSerifCJKjp.zip",
         "OTF/Japanese/NotoSerifCJKjp-Regular.otf",
     ),
+    # カラー絵文字（CBDT ビットマップ）。絵文字のフォールバック用
+    (
+        "NotoColorEmoji.ttf",
+        "https://github.com/googlefonts/noto-emoji/raw/main/fonts/NotoColorEmoji.ttf",
+        None,
+    ),
+    # カラー絵文字（COLR v1 のベクター版）。PDF / SVG ではこちらの方が軽くきれい
+    (
+        "Noto-COLRv1.ttf",
+        "https://github.com/googlefonts/noto-emoji/raw/main/fonts/Noto-COLRv1.ttf",
+        None,
+    ),
 ]
 
 

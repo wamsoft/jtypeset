@@ -44,6 +44,8 @@ DEFAULT_FONT_CANDIDATES = {
         "/usr/share/fonts/noto-cjk/NotoSerifCJK-Regular.ttc",
     ],
     "emoji": [
+        "data/Noto-COLRv1.ttf",          # make fontdata で取る Noto の絵文字（COLR v1、ベクター）
+        "data/NotoColorEmoji.ttf",       # 同（CBDT ビットマップ）
         "C:/Windows/Fonts/seguiemj.ttf",
         "/System/Library/Fonts/Apple Color Emoji.ttc",
         "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",

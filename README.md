@@ -86,7 +86,7 @@ pages[0].save_png("neko_p1.png", dpi=144)
 
 ```bash
 export VCPKG_ROOT=/path/to/vcpkg
-make fontdata                                   # テスト・サンプル用の Noto フォントを data/ にダウンロード
+make fontdata                                   # テスト・サンプル用の Noto フォント（絵文字含む）を data/ にダウンロード
 make prebuild                                   # cmake --preset（Windows: x64-windows。Linux / macOS の preset もある）
 make build                                      # cmake --build
 make test                                       # ctest（doctest）

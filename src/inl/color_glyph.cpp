@@ -108,10 +108,8 @@ bool emitBitmap(dl::DisplayList& out, glyphware::Face& face, uint32_t gid, Pt si
             o[3] = a;
         }
     }
-    // 実際に取れた strike の大きさに合わせる（固定サイズの strike しか無いフォントがある）
-    const glyphware::LineMetrics fm = face.lineMetrics();
-    const float ppem = fm.ppemY > 0.0f ? fm.ppemY : static_cast<float>(px);
-    const float s = size / ppem;   // 1px あたりの pt
+    // glyphware は固定 strike のビットマップを要求ピクセルサイズに拡縮して返すので、px で割る
+    const float s = size / static_cast<float>(px);   // 1px あたりの pt
     // ピクセル (i, j) → ペン原点の y-down ローカル: (left + i, −top + j) × s
     Matrix local = multiply(Matrix::translation(bm.left * s, -bm.top * s), Matrix::scaling(s, s));
     dl::ImageItem item;

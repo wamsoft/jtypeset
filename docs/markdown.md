@@ -46,8 +46,8 @@ jtypeset-md hello.md --png 120  # hello_p1.png … も出す（確認用）
 
 フォントを指定しなければ、カレントの `data/` の Noto → OS のフォント（Windows: 游明朝・游ゴシック、macOS: ヒラギノ、
 Linux: Noto CJK）の順に探します。見つからなければエラーになるので、`--font` か front matter の `fonts` で指定してください。
-絵文字は OS のカラー絵文字フォント（Segoe UI Emoji / Apple Color Emoji / Noto Color Emoji）が見つかれば自動でフォールバックに
-加わり、PDF / SVG / PNG のどれでもカラーで組まれます（縦組みでは正立）。
+絵文字は `data/` の Noto 絵文字フォント（`make fontdata`）か OS のカラー絵文字フォント（Segoe UI Emoji / Apple Color Emoji /
+Noto Color Emoji）が見つかれば自動でフォールバックに加わり、PDF / SVG / PNG のどれでもカラーで組まれます（縦組みでは正立）。
 
 ## 3. コマンドラインオプション
 

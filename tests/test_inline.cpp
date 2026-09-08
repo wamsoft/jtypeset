@@ -331,8 +331,9 @@ TEST_CASE("preserveSpaces expands tabs to tab stops") {
 TEST_CASE("emoji: color layers are emitted as filled paths and ZWJ sequences stay together in vertical text") {
     Fixture fx;
     if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
-    // カラー絵文字フォント（Windows の Segoe UI Emoji）があるときだけ
-    auto emoji = fx.fonts.loadFile("C:/Windows/Fonts/seguiemj.ttf", "emoji");
+    // カラー絵文字フォント: make fontdata の Noto-COLRv1（COLR v1）、無ければ Windows の Segoe UI Emoji
+    auto emoji = fx.fonts.loadFile("data/Noto-COLRv1.ttf", "emoji");
+    if (!emoji) emoji = fx.fonts.loadFile("C:/Windows/Fonts/seguiemj.ttf", "emoji");
     if (!emoji) { MESSAGE("no color emoji font; skipping"); return; }
     REQUIRE(emoji->descriptor().color);
 
@@ -398,4 +399,38 @@ TEST_CASE("emoji: color layers are emitted as filled paths and ZWJ sequences sta
         CHECK(emojiGlyphs >= 1);
         CHECK(upright);
     }
+}
+
+TEST_CASE("emoji: bitmap (CBDT) color fonts are emitted as images at the text size") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+    auto emoji = fx.fonts.loadFile("data/NotoColorEmoji.ttf", "emoji");
+    if (!emoji) { MESSAGE("no NotoColorEmoji.ttf (make fontdata); skipping"); return; }
+    REQUIRE(emoji->descriptor().color);
+    TextStyle st = fx.style(14.0f);
+    st.font.family = {"serif-ja", "emoji"};
+    inl::ParagraphLayouter layouter(fx.fonts);
+    const inl::ConstantLineShape shape(300.0f);
+    inl::Paragraph p = inl::Paragraph::plain(u"あ😀い", st);
+    const inl::ParagraphFragment frag = layouter.layout(p, WritingMode::HorizontalTb, shape);
+    REQUIRE(frag.lines.size() == 1);
+    dl::DisplayList out;
+    inl::emitParagraph(out, frag, WritingMode::HorizontalTb, Point{0, 20});
+    int images = 0;
+    Rect box;
+    for (const dl::Item& item : out.items) {
+        if (const auto* im = std::get_if<dl::ImageItem>(&item)) {
+            ++images;
+            REQUIRE(static_cast<bool>(im->image));
+            const Point a = im->xform.apply(Point{0, 0});
+            const Point b = im->xform.apply(Point{static_cast<float>(im->image->width), static_cast<float>(im->image->height)});
+            box = Rect{std::min(a.x, b.x), std::min(a.y, b.y), std::fabs(b.x - a.x), std::fabs(b.y - a.y)};
+        }
+    }
+    CHECK(images == 1);
+    // 大きさは文字サイズ程度（0.8〜1.6em）、ベースライン（y=20）をまたいで上側に大部分がある
+    CHECK(box.w > 14.0f * 0.8f);
+    CHECK(box.w < 14.0f * 1.6f);
+    CHECK(box.y < 20.0f);
+    CHECK(box.bottom() > 20.0f - 14.0f * 0.4f);
 }

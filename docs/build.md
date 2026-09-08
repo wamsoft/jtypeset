@@ -8,7 +8,7 @@
 - [glyphware](https://github.com/wamsoft/glyphware)（FreeType + HarfBuzz の包み）: CMake の FetchContent で自動取得。
   開発中は `GLYPHWARE_DIR=/path/to/glyphware` でローカルツリーを指せる
 - Python バインディング: Python 3.9+ と `pip install pybind11`
-- テスト・サンプル用フォント: `make fontdata`（Noto Serif/Sans JP と Noto Serif/Sans を `data/` にダウンロード）
+- テスト・サンプル用フォント: `make fontdata`（Noto Serif/Sans JP、Noto Serif/Sans、絵文字の Noto-COLRv1 / NotoColorEmoji を `data/` にダウンロード）
 
 ## 手順
 
