@@ -141,6 +141,16 @@ if(TYPESET_HANDLER_MICROTEX)
     add_subdirectory(handlers/microtex)
 endif()
 
+# リファレンス（Doxygen があれば）: cmake --build <build> --target docs → build/docs/cpp/html/index.html
+find_package(Doxygen QUIET)
+if(DOXYGEN_FOUND)
+    add_custom_target(docs
+        COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_SOURCE_DIR}/docs/Doxyfile
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMENT "Doxygen: C++ reference → build/docs/cpp"
+        VERBATIM)
+endif()
+
 if(TYPESET_BUILD_PYTHON)
     add_subdirectory(python)
 endif()

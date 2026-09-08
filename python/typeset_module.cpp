@@ -42,31 +42,38 @@ struct LineInfo {
 } // namespace
 
 PYBIND11_MODULE(_typeset, m) {
-    m.doc() = "typeset — 縦書き・横書きの日本語組版ライブラリ";
+    m.doc() = R"doc(typeset — 縦書き・横書きの日本語組版ライブラリ（C++ コアの Python バインディング）
+
+流れ: FontSet でフォントを開く → TextStyle / Paragraph / Flow で内容を組み立てる → PageSequence で判型・段・柱を決める
+→ FlowLayouter.layout() でページ列にする → Page.save_png / save_svg、save_pdf(pages, path) で出力する。
+単位は pt（MM / CM / INCH の定数で換算）。座標はページ左上原点・y 下向き。
+本文中の {page} {pages} {title}（柱・ノンブル）、{ref:label} {page:label}（相互参照）、{fig} {table} {eq}（番号）、
+{index:よみ|用語}（索引）は FlowLayouter が置換・収集する。
+Markdown → PDF は typeset.md（typeset-md コマンド）。)doc";
 
     m.attr("MM") = kMm;
     m.attr("INCH") = kInch;
     m.attr("CM") = kCm;
 
     // ---- 幾何・色 ----
-    py::class_<Point>(m, "Point")
+    py::class_<Point>(m, "Point", "点（pt、ページ左上原点・y 下向き）")
         .def(py::init<>())
         .def(py::init<Pt, Pt>(), py::arg("x"), py::arg("y"))
         .def_readwrite("x", &Point::x)
         .def_readwrite("y", &Point::y);
-    py::class_<Size>(m, "Size")
+    py::class_<Size>(m, "Size", "大きさ（pt）")
         .def(py::init<>())
         .def(py::init<Pt, Pt>(), py::arg("w"), py::arg("h"))
         .def_readwrite("w", &Size::w)
         .def_readwrite("h", &Size::h);
-    py::class_<Rect>(m, "Rect")
+    py::class_<Rect>(m, "Rect", "矩形（pt）。x, y, w, h")
         .def(py::init<>())
         .def(py::init<Pt, Pt, Pt, Pt>(), py::arg("x"), py::arg("y"), py::arg("w"), py::arg("h"))
         .def_readwrite("x", &Rect::x)
         .def_readwrite("y", &Rect::y)
         .def_readwrite("w", &Rect::w)
         .def_readwrite("h", &Rect::h);
-    py::class_<Color>(m, "Color")
+    py::class_<Color>(m, "Color", "色（RGBA、0–255）")
         .def(py::init<>())
         .def(py::init([](int r, int g, int b, int a) {
                  return Color{static_cast<uint8_t>(r), static_cast<uint8_t>(g),
@@ -77,7 +84,7 @@ PYBIND11_MODULE(_typeset, m) {
         .def_readwrite("g", &Color::g)
         .def_readwrite("b", &Color::b)
         .def_readwrite("a", &Color::a);
-    py::class_<Stroke>(m, "Stroke")
+    py::class_<Stroke>(m, "Stroke", "線の描き方（色・幅・端・角）")
         .def(py::init<>())
         .def(py::init([](Color c, Pt w) { Stroke s; s.color = c; s.width = w; return s; }),
              py::arg("color"), py::arg("width") = 1.0f)
@@ -103,7 +110,7 @@ PYBIND11_MODULE(_typeset, m) {
         .value("KNUTH_PLASS", LineBreakStrategy::KnuthPlass);
 
     // ---- フォント ----
-    py::class_<font::FontSet>(m, "FontSet")
+    py::class_<font::FontSet>(m, "FontSet", "フォントの集合。load_file / load_bytes で開き、TextStyle の family（キーまたは family 名）で引く。文字が無ければ次の family へフォールバックする")
         .def(py::init<>())
         .def("load_file",
              [](font::FontSet& fs, const std::string& path, const std::string& key, int index) {
@@ -120,7 +127,7 @@ PYBIND11_MODULE(_typeset, m) {
         .def_property_readonly("size", &font::FontSet::size);
 
     // ---- スタイル ----
-    py::class_<FontSpec>(m, "FontSpec")
+    py::class_<FontSpec>(m, "FontSpec", "フォント指定（family の列＋ウェイト＋斜体）")
         .def(py::init<>())
         .def(py::init([](std::vector<std::string> family, int weight, bool italic) {
                  FontSpec f; f.family = std::move(family); f.weight = weight; f.italic = italic; return f;
@@ -130,7 +137,7 @@ PYBIND11_MODULE(_typeset, m) {
         .def_readwrite("weight", &FontSpec::weight)
         .def_readwrite("italic", &FontSpec::italic);
 
-    py::class_<TextStyle>(m, "TextStyle")
+    py::class_<TextStyle>(m, "TextStyle", "文字スタイル: フォント・サイズ・色・縁取り・字間・向き・平体長体・合成ボールド／斜体・ベースラインのずらし")
         .def(py::init<>())
         .def(py::init([](std::vector<std::string> family, Pt size, Color fill) {
                  TextStyle s; s.font.family = std::move(family); s.size = size; s.fill = fill; return s;
@@ -150,20 +157,20 @@ PYBIND11_MODULE(_typeset, m) {
         .def_readwrite("language", &TextStyle::language)
         .def("copy", [](const TextStyle& s) { return TextStyle(s); });
 
-    py::class_<SpacingOptions>(m, "SpacingOptions")
+    py::class_<SpacingOptions>(m, "SpacingOptions", "約物の詰め・ぶら下げ・和欧間・和字間の伸縮（JLReq のアキ量表）")
         .def(py::init<>())
         .def_readwrite("punctuation_spacing", &SpacingOptions::punctuationSpacing)
         .def_readwrite("hanging_punctuation", &SpacingOptions::hangingPunctuation)
         .def_readwrite("latin_gap", &SpacingOptions::latinGap)
         .def_readwrite("kanji_skip_stretch", &SpacingOptions::kanjiSkipStretch)
         .def_readwrite("kanji_skip_shrink", &SpacingOptions::kanjiSkipShrink);
-    py::class_<BreakOptions>(m, "BreakOptions")
+    py::class_<BreakOptions>(m, "BreakOptions", "行分割の方法（Greedy / Knuth–Plass）と両端揃え")
         .def(py::init<>())
         .def_readwrite("strategy", &BreakOptions::strategy)
         .def_readwrite("justify", &BreakOptions::justify)
         .def_readwrite("tolerance", &BreakOptions::tolerance)
         .def_readwrite("line_penalty", &BreakOptions::linePenalty);
-    py::class_<ParagraphStyle>(m, "ParagraphStyle")
+    py::class_<ParagraphStyle>(m, "ParagraphStyle", "段落スタイル: 揃え・行送り・一字下げ・向き・空白保持（コード）・タブ幅・アキ量・行分割")
         .def(py::init<>())
         .def_readwrite("align", &ParagraphStyle::align)
         .def_readwrite("first_line_indent", &ParagraphStyle::firstLineIndent)
@@ -187,7 +194,7 @@ PYBIND11_MODULE(_typeset, m) {
         .value("DOT", inl::EmphasisMark::Dot)
         .value("FILLED_CIRCLE", inl::EmphasisMark::FilledCircle)
         .value("OPEN_CIRCLE", inl::EmphasisMark::OpenCircle);
-    py::class_<inl::Annotation>(m, "Annotation")
+    py::class_<inl::Annotation>(m, "Annotation", "行内注記。ruby / tate_chu_yoko / emphasis / warichu / jidori の静的メソッドで作り、範囲は段落テキストの UTF-16 位置")
         .def_readwrite("start", &inl::Annotation::start)
         .def_readwrite("end", &inl::Annotation::end)
         .def_readwrite("text", &inl::Annotation::text)
@@ -202,7 +209,7 @@ PYBIND11_MODULE(_typeset, m) {
                     py::arg("text") = std::u16string(), py::arg("scale") = 0.5f)
         .def_static("jidori", &inl::Annotation::jidori, py::arg("start"), py::arg("end"), py::arg("em"));
 
-    py::class_<inl::InlineRun>(m, "InlineRun")
+    py::class_<inl::InlineRun>(m, "InlineRun", "スタイルの付いたテキスト片（段落の構成要素）。literal なら {name} の置換をしない")
         .def(py::init([](std::u16string text, TextStyle style) {
                  return inl::InlineRun{std::move(text), std::move(style)};
              }),
@@ -211,7 +218,7 @@ PYBIND11_MODULE(_typeset, m) {
         .def_readwrite("style", &inl::InlineRun::style)
         .def_readwrite("literal", &inl::InlineRun::literal);
 
-    py::class_<inl::Paragraph>(m, "Paragraph")
+    py::class_<inl::Paragraph>(m, "Paragraph", "段落: run の列＋注記＋段落スタイル。add_run / add_image / add_object / add_footnote / annotate で組み立てる")
         .def(py::init<>())
         .def(py::init([](std::u16string text, TextStyle style, std::optional<ParagraphStyle> pstyle) {
                  return inl::Paragraph::plain(std::move(text), std::move(style),
@@ -256,7 +263,7 @@ PYBIND11_MODULE(_typeset, m) {
         .value("AUTO", block::BreakKind::Auto)
         .value("COLUMN", block::BreakKind::Column)
         .value("PAGE", block::BreakKind::Page);
-    py::class_<block::BlockStyle>(m, "BlockStyle")
+    py::class_<block::BlockStyle>(m, "BlockStyle", "ブロックの前後アキ・改ページ制御（orphans / widows / keep_with_next / keep_together / break_before / break_after）・段抜き・ラベル・背景・余白")
         .def(py::init<>())
         .def_readwrite("space_before", &block::BlockStyle::spaceBefore)
         .def_readwrite("space_after", &block::BlockStyle::spaceAfter)
@@ -287,7 +294,7 @@ PYBIND11_MODULE(_typeset, m) {
         .value("BLOCK", block::ImagePlacement::Block)
         .value("FLOAT_START", block::ImagePlacement::FloatStart)
         .value("FLOAT_END", block::ImagePlacement::FloatEnd);
-    py::class_<block::ImageBlock>(m, "ImageBlock")
+    py::class_<block::ImageBlock>(m, "ImageBlock", "画像ブロック。placement で流れに置くか回り込み（FLOAT_START / FLOAT_END）、caption の {fig} は図番号")
         .def(py::init<>())
         .def_property("image",
                       [](const block::ImageBlock& b) { return std::const_pointer_cast<dl::Image>(b.image); },
@@ -329,13 +336,13 @@ PYBIND11_MODULE(_typeset, m) {
         .value("TOP", block::VAlign::Top)
         .value("MIDDLE", block::VAlign::Middle)
         .value("BOTTOM", block::VAlign::Bottom);
-    py::class_<block::TableColumn>(m, "TableColumn")
+    py::class_<block::TableColumn>(m, "TableColumn", "表の列（幅 0 なら自動、揃え）")
         .def(py::init<>())
         .def(py::init([](Pt width, Align align) { return block::TableColumn{width, align}; }),
              py::arg("width") = 0.0f, py::arg("align") = Align::Start)
         .def_readwrite("width", &block::TableColumn::width)
         .def_readwrite("align", &block::TableColumn::align);
-    py::class_<block::TableCell>(m, "TableCell")
+    py::class_<block::TableCell>(m, "TableCell", "表のセル（段落の列、colspan / rowspan、縦位置）")
         .def(py::init<>())
         .def(py::init([](inl::Paragraph p, int colspan, int rowspan, block::VAlign valign) {
                  block::TableCell c; c.paras.push_back(std::move(p)); c.colspan = colspan; c.rowspan = rowspan;
@@ -347,7 +354,7 @@ PYBIND11_MODULE(_typeset, m) {
         .def_readwrite("colspan", &block::TableCell::colspan)
         .def_readwrite("rowspan", &block::TableCell::rowspan)
         .def_readwrite("valign", &block::TableCell::valign);
-    py::class_<block::TableRow>(m, "TableRow")
+    py::class_<block::TableRow>(m, "TableRow", "表の行（セルの列、header ならページをまたいで繰り返す）")
         .def(py::init<>())
         .def(py::init([](std::vector<block::TableCell> cells, bool header) {
                  block::TableRow r; r.cells = std::move(cells); r.header = header; return r;
@@ -355,7 +362,7 @@ PYBIND11_MODULE(_typeset, m) {
              py::arg("cells"), py::arg("header") = false)
         .def_readwrite("cells", &block::TableRow::cells)
         .def_readwrite("header", &block::TableRow::header);
-    py::class_<block::TableBorders>(m, "TableBorders")
+    py::class_<block::TableBorders>(m, "TableBorders", "表の罫線（外枠・内側・ヘッダ下の太さ、縦横の有無、色）")
         .def(py::init<>())
         .def_readwrite("outer", &block::TableBorders::outer)
         .def_readwrite("inner", &block::TableBorders::inner)
@@ -363,7 +370,7 @@ PYBIND11_MODULE(_typeset, m) {
         .def_readwrite("vertical", &block::TableBorders::vertical)
         .def_readwrite("horizontal", &block::TableBorders::horizontal)
         .def_readwrite("color", &block::TableBorders::color);
-    py::class_<block::TableBlock>(m, "TableBlock")
+    py::class_<block::TableBlock>(m, "TableBlock", "表。列幅は固定／自動、colspan / rowspan、ヘッダの繰り返し、段より高い行の分割、caption の {table} は表番号")
         .def(py::init<>())
         .def_readwrite("columns", &block::TableBlock::columns)
         .def_readwrite("rows", &block::TableBlock::rows)
@@ -379,7 +386,7 @@ PYBIND11_MODULE(_typeset, m) {
     py::enum_<block::ListBlock::Marker>(m, "ListMarker")
         .value("BULLET", block::ListBlock::Marker::Bullet)
         .value("NUMBERED", block::ListBlock::Marker::Numbered);
-    py::class_<block::ListBlock>(m, "ListBlock")
+    py::class_<block::ListBlock>(m, "ListBlock", "箇条書き（記号／番号）")
         .def(py::init<>())
         .def(py::init([](std::vector<inl::Paragraph> items, block::ListBlock::Marker marker) {
                  block::ListBlock l; l.items = std::move(items); l.marker = marker; return l;
@@ -393,7 +400,7 @@ PYBIND11_MODULE(_typeset, m) {
         .def_readwrite("gap", &block::ListBlock::gap)
         .def_readwrite("item_gap", &block::ListBlock::itemGap)
         .def_readwrite("block", &block::ListBlock::block);
-    py::class_<block::TocBlock>(m, "TocBlock")
+    py::class_<block::TocBlock>(m, "TocBlock", "目次。見出し（採番済み）とページ番号を前のパスから集めて並べる")
         .def(py::init<>())
         .def(py::init([](TextStyle style, int maxLevel) {
                  block::TocBlock t; t.style = std::move(style); t.maxLevel = maxLevel; return t;
@@ -419,7 +426,7 @@ PYBIND11_MODULE(_typeset, m) {
         .def_readwrite("page_separator", &block::IndexBlock::pageSeparator)
         .def_readwrite("block", &block::IndexBlock::block);
 
-    py::class_<block::Flow>(m, "Flow")
+    py::class_<block::Flow>(m, "Flow", "ブロックの列。add_paragraph / add_heading / add_list / add_table / add_image / add_object / add_toc / add_index / add_rule / add_page_break …")
         .def(py::init<>())
         .def("add_paragraph", &block::Flow::addParagraph, py::arg("paragraph"),
              py::arg("style") = block::BlockStyle{})
@@ -454,7 +461,7 @@ PYBIND11_MODULE(_typeset, m) {
     paper.attr("SHINSHO") = page::paper::Shinsho;
     paper.def("landscape", &page::paper::landscape);
 
-    py::class_<page::Margins>(m, "Margins")
+    py::class_<page::Margins>(m, "Margins", "余白（top / bottom / inner / outer。pt）。duplex では inner がノド側")
         .def(py::init<>())
         .def(py::init([](Pt top, Pt bottom, Pt inner, Pt outer) {
                  return page::Margins{top, bottom, inner, outer};
@@ -464,14 +471,14 @@ PYBIND11_MODULE(_typeset, m) {
         .def_readwrite("bottom", &page::Margins::bottom)
         .def_readwrite("inner", &page::Margins::inner)
         .def_readwrite("outer", &page::Margins::outer);
-    py::class_<page::RunningText>(m, "RunningText")
+    py::class_<page::RunningText>(m, "RunningText", "柱・ノンブル。{page} {pages} {title} を置換。mirror_on_even で見開きの偶数ページを左右反転")
         .def(py::init<>())
         .def(py::init([](inl::Paragraph p, Pt offset) { return page::RunningText{std::move(p), offset}; }),
              py::arg("paragraph"), py::arg("offset") = 0.0f)
         .def_readwrite("paragraph", &page::RunningText::para)
         .def_readwrite("offset", &page::RunningText::offset)
         .def_readwrite("mirror_on_even", &page::RunningText::mirrorOnEven);
-    py::class_<page::PageMaster>(m, "PageMaster")
+    py::class_<page::PageMaster>(m, "PageMaster", "ページマスタ: 判型・余白・段数・書字方向・柱・ノンブル・duplex")
         .def(py::init<>())
         .def_readwrite("size", &page::PageMaster::size)
         .def_readwrite("margin", &page::PageMaster::margin)
@@ -482,12 +489,12 @@ PYBIND11_MODULE(_typeset, m) {
         .def_readwrite("footer", &page::PageMaster::footer)
         .def_readwrite("duplex", &page::PageMaster::duplex)
         .def("body_rect", &page::PageMaster::bodyRect, py::arg("page_number"));
-    py::class_<page::PageSequence>(m, "PageSequence")
+    py::class_<page::PageSequence>(m, "PageSequence", "ページ列の設定（マスタ＋開始ページ番号）")
         .def(py::init<>())
         .def_readwrite("master", &page::PageSequence::master)
         .def_readwrite("first_page_number", &page::PageSequence::firstPageNumber);
 
-    py::class_<page::Page>(m, "Page")
+    py::class_<page::Page>(m, "Page", "組版結果の 1 ページ（番号＋表示リスト）。save_png / save_svg / to_svg で出力、PDF は save_pdf(pages, path)")
         .def_readonly("number", &page::Page::number)
         .def("render",
              [](const page::Page& pg, float dpi, Color background) {
@@ -573,7 +580,7 @@ PYBIND11_MODULE(_typeset, m) {
         .def_property_readonly("cache_size", &obj::ObjectRegistry::cacheSize)
         .def_property_readonly("errors", &obj::ObjectRegistry::errors);
 
-    py::class_<page::FlowLayouter>(m, "FlowLayouter")
+    py::class_<page::FlowLayouter>(m, "FlowLayouter", "Flow をページ列へ流し込む。layout(flow, sequence, ...) がページの列を返す（採番・参照・目次・索引は多パス）")
         .def(py::init<font::FontSet&>(), py::arg("fonts"), py::keep_alive<1, 2>())
         .def("layout",
              [](page::FlowLayouter& l, const block::Flow& flow, const page::PageSequence& seq,
@@ -626,7 +633,7 @@ PYBIND11_MODULE(_typeset, m) {
           "ページ列を 1 つの PDF に書く。(ok, warnings) を返す");
 
     // ---- 低レベル: 段落 1 つを組む ----
-    py::class_<LineInfo>(m, "LineInfo")
+    py::class_<LineInfo>(m, "LineInfo", "layout_paragraph が返す 1 行の情報")
         .def_readonly("char_start", &LineInfo::charStart)
         .def_readonly("char_end", &LineInfo::charEnd)
         .def_readonly("length", &LineInfo::length)

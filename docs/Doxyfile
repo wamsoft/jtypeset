@@ -1,0 +1,54 @@
+# typeset の C++ リファレンス（Doxygen）
+#
+#   doxygen docs/Doxyfile            # リポジトリルートで実行 → build/docs/cpp/html/index.html
+#   cmake --build build/x64-windows --target docs   # Doxygen が見つかれば同じことをする
+#
+# 既定値と違う項目だけ書いている（doxygen -g で出る完全版と併用可）。
+
+PROJECT_NAME           = "typeset"
+PROJECT_BRIEF          = "縦書き・横書きの日本語組版ライブラリ（JLReq 水準、ラスタ / PDF / SVG）"
+PROJECT_NUMBER         = 0.1.0
+OUTPUT_DIRECTORY       = build/docs/cpp
+OUTPUT_LANGUAGE        = Japanese
+INPUT_ENCODING         = UTF-8
+
+INPUT                  = docs/cpp_guide.md include/typeset
+FILE_PATTERNS          = *.hpp *.md
+RECURSIVE              = YES
+USE_MDFILE_AS_MAINPAGE = docs/cpp_guide.md
+STRIP_FROM_PATH        = include
+STRIP_FROM_INC_PATH    = include
+EXAMPLE_PATH           = samples
+
+EXTRACT_ALL            = YES
+EXTRACT_STATIC         = YES
+EXTRACT_ANON_NSPACES   = NO
+HIDE_UNDOC_MEMBERS     = NO
+JAVADOC_AUTOBRIEF      = YES
+QT_AUTOBRIEF           = YES
+MULTILINE_CPP_IS_BRIEF = NO
+INLINE_INHERITED_MEMB  = YES
+SORT_MEMBER_DOCS       = NO
+SHOW_NAMESPACES        = YES
+GENERATE_TREEVIEW      = YES
+DISABLE_INDEX          = NO
+FULL_SIDEBAR           = NO
+HTML_DYNAMIC_SECTIONS  = YES
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = NO
+REFERENCED_BY_RELATION = YES
+REFERENCES_RELATION    = YES
+
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+GENERATE_XML           = NO
+HAVE_DOT               = NO
+CLASS_GRAPH            = TEXT
+
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = YES
+PREDEFINED             = TYPESET_MICROTEX_RES_DIR=""
+WARN_IF_UNDOCUMENTED   = NO
+WARN_NO_PARAMDOC       = NO
+WARN_IF_INCOMPLETE_DOC = NO
+QUIET                  = YES

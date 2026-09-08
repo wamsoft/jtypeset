@@ -40,7 +40,7 @@ endif
 
 BUILD_PATH=$(shell cmake --preset $(PRESET) -N | grep BUILD_DIR | sed 's/.*BUILD_DIR="\(.*\)"/\1/')
 
-.PHONY: prebuild build clean test fontdata
+.PHONY: prebuild build clean test fontdata docs pydocs
 
 all: build
 
@@ -60,3 +60,17 @@ test:
 # テスト用 Noto フォントをダウンロード
 fontdata:
 	python3 data/download_fonts.py
+
+# C++ リファレンス（Doxygen。DOXYGEN=path で実行ファイルを指定できる）→ build/docs/cpp/html/index.html
+DOXYGEN?=doxygen
+docs:
+	$(DOXYGEN) docs/Doxyfile
+
+# Python リファレンス: 型スタブ（_typeset.pyi）と pdoc の HTML → build/docs/python/index.html
+# 事前に pip install pdoc pybind11-stubgen。ビルド済みの python パッケージを読む
+PYPKG=$(BUILD_PATH)/python/$(BUILD_TYPE)
+pydocs:
+	PYTHONPATH=$(PYPKG) pybind11-stubgen typeset._typeset -o python --ignore-all-errors
+	cp -r python/typeset/_typeset $(PYPKG)/typeset/
+	mkdir -p build/docs
+	PYTHONPATH=$(PYPKG) pdoc typeset -o build/docs/python --no-show-source

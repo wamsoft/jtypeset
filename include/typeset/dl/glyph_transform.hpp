@@ -23,7 +23,8 @@ inline constexpr float kFakeItalicSkew = -0.25f;
  * 順序は「フェイク幅／斜体 → スケール → 回転」。
  *
  * @param rotation   ラジアン。数学慣習（y-up）の反時計回りが正。横倒しは -90°
- * @param scaleX,Y   平体・長体・縦中横の圧縮
+ * @param scaleX     平体・長体・縦中横の圧縮（行方向）
+ * @param scaleY     同（行送り方向）
  * @param skewX      シアー。フェイクイタリックなら kFakeItalicSkew
  * @param fakeScaleX フォント幅のうち wdth 軸で吸収できない分の水平スケール
  */

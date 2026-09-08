@@ -135,9 +135,20 @@ ts.save_pdf(pages, "out.pdf"); pages[0].save_png("out.png", dpi=144)
 
 | ファイル | 内容 |
 |---|---|
+| `docs/cpp_guide.md` | C++ の使い方と主要な型（Doxygen のトップページ） |
+| `docs/python_guide.md` | Python の使い方、`typeset.md` の front matter 一覧 |
 | `検討.md` | 既存資産の棚卸し、設計判断、参照仕様、フェーズ計画、決定事項 |
 | `設計.md` | ディレクトリ・名前空間・型・処理の流れ（Phase 0〜2 の具体化） |
 | `実装.md` | フェーズ別の実装進捗・確認結果・積み残し |
+
+リファレンスの生成:
+
+```bash
+make docs                       # C++: Doxygen（docs/Doxyfile）→ build/docs/cpp/html/index.html。DOXYGEN=path で実行ファイル指定
+make pydocs                     # Python: 型スタブ python/typeset/_typeset/ と pdoc の HTML → build/docs/python/index.html
+                                #   （pip install pdoc pybind11-stubgen。ビルド済みの python パッケージを読む）
+cmake --build build/x64-windows --target docs   # Doxygen が PATH にあれば同じ
+```
 
 ## ライセンス
 

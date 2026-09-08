@@ -8,9 +8,13 @@ from . import _typeset as _ext
 from ._typeset import *  # noqa: F401,F403
 
 # 拡張モジュールのサブモジュール・定数（`paper` など）も見えるように
+__all__ = []
 for _name in dir(_ext):
-    if not _name.startswith("_") and _name not in globals():
-        globals()[_name] = getattr(_ext, _name)
+    if not _name.startswith("_"):
+        if _name not in globals():
+            globals()[_name] = getattr(_ext, _name)
+        __all__.append(_name)
+__all__.append("md")
 del _name
 
 __version__ = "0.1.0"

@@ -47,6 +47,8 @@ struct LogicalPoint {
 
 /**
  * 論理座標 → 物理座標
+ * @param wm 書字方向
+ * @param p 論理座標（inline_ = 行頭からの送り、block = 中心線からのずれ）
  * @param lineOrigin 行頭の物理位置（行の中心線上の点）
  */
 inline Point toPhysical(WritingMode wm, LogicalPoint p, Point lineOrigin) {
