@@ -217,7 +217,7 @@ int main() {
     para(u"Python から使う場合の最小の例を示す。コードブロックは空白を保持し、背景を付ける。");
     {
         inl::Paragraph p = inl::Paragraph::plain(
-            u"import typeset as ts\n"
+            u"import jtypeset as ts\n"
             u"fonts = ts.FontSet()\n"
             u"fonts.load_file(\"data/NotoSerifJP-Regular.otf\", \"serif-ja\")\n"
             u"body = ts.TextStyle([\"serif-ja\"], 10.0)\n"

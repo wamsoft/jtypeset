@@ -78,34 +78,34 @@ make build
   数式フォントのグリフとして PDF に埋め込まれる
 - 出力: ラスタ（PNG）、PDF（Identity-H・hb-subset・Flate・画像・しおり）、SVG。Python バインディング
 
-## Python
+## Python（PyPI 名: `jtypeset`、`import jtypeset`）
 
 ```bash
 # 開発ツリーから
 pip install pybind11
 make prebuild GLYPHWARE_DIR=d:/work/kirikiri/glyphware CMAKEOPT=-DTYPESET_BUILD_PYTHON=ON
 make build
-PYTHONPATH=build/x64-windows/python/Release python python/examples/script.py    # typeset/ パッケージ（_typeset 拡張 + 純 Python）
+PYTHONPATH=build/x64-windows/python/Release python python/examples/script.py    # typeset/ パッケージ（_jtypeset 拡張 + 純 Python）
 PYTHONPATH=build/x64-windows/python/Release python python/examples/objects.py   # Python 関数／外部コマンドをオブジェクトのハンドラに
 
 # wheel（scikit-build-core。VCPKG_ROOT を設定しておけば toolchain は CMakeLists が補う。glyphware は FetchContent）
 pip wheel . -w dist --no-deps
-pip install dist/typeset-*.whl
+pip install dist/jtypeset-*.whl
 ```
 
-### Markdown → PDF（`typeset.md`）
+### Markdown → PDF（`jtypeset.md`）
 
 ```bash
-pip install "typeset[md]"            # markdown-it-py / mdit-py-plugins / PyYAML
-pip install "typeset[md,highlight]"  # + Pygments（コードブロックの色付け。無くても単色で組める）
-typeset-md report.md                 # report.pdf
-typeset-md report.md --vertical --paper A5 --font fonts/mincho.otf --toc
-python -m typeset.md report.md -o out.pdf --png 120 --math mathtext   # 数式は matplotlib の mathtext（任意）
+pip install "jtypeset[md]"            # markdown-it-py / mdit-py-plugins / PyYAML
+pip install "jtypeset[md,highlight]"  # + Pygments（コードブロックの色付け。無くても単色で組める）
+jtypeset-md report.md                 # report.pdf
+jtypeset-md report.md --vertical --paper A5 --font fonts/mincho.otf --toc
+python -m jtypeset.md report.md -o out.pdf --png 120 --math mathtext   # 数式は matplotlib の mathtext（任意）
 ```
 
 先頭の YAML front matter で題名・著者・判型（A4/A5/B5/B6/文庫/新書/`148x210mm`）・書字方向・段数・余白・フォント・
 本文サイズ・行送り・目次・見出し採番・柱／ノンブル・数式ハンドラ（`mathtext` か `command: <cmd>`）を指定できる
-（`python/typeset/md/convert.py` の `Options`）。CLI の指定は front matter より優先。
+（`python/jtypeset/md/convert.py` の `Options`）。CLI の指定は front matter より優先。
 
 対応する記法: 見出し（採番・PDF しおり・`{#label}` → `{ref:label}` `{page:label}`）、段落（一字下げ・両端揃え）、
 箇条書き／番号付き（入れ子）、コードブロック（背景・空白保持・タブ展開。Pygments があれば言語名で色付け）、
@@ -120,7 +120,7 @@ Linux: Noto CJK）を探す。TTC はサブセット化して埋め込む。OS/2
 サブセット不可）を見て、埋め込めないフォントは警告を出して埋め込まない。
 
 ```python
-import typeset as ts
+import jtypeset as ts
 fonts = ts.FontSet(); fonts.load_file("data/NotoSerifJP-Regular.otf", "serif-ja")
 body = ts.TextStyle(["serif-ja"], 11.0)
 seq = ts.PageSequence(); seq.master.size = ts.paper.A5; seq.master.writing_mode = ts.WritingMode.VERTICAL_RL
@@ -136,7 +136,7 @@ ts.save_pdf(pages, "out.pdf"); pages[0].save_png("out.png", dpi=144)
 | ファイル | 内容 |
 |---|---|
 | `docs/cpp_guide.md` | C++ の使い方と主要な型（Doxygen のトップページ） |
-| `docs/python_guide.md` | Python の使い方、`typeset.md` の front matter 一覧 |
+| `docs/python_guide.md` | Python の使い方、`jtypeset.md` の front matter 一覧 |
 | `検討.md` | 既存資産の棚卸し、設計判断、参照仕様、フェーズ計画、決定事項 |
 | `設計.md` | ディレクトリ・名前空間・型・処理の流れ（Phase 0〜2 の具体化） |
 | `実装.md` | フェーズ別の実装進捗・確認結果・積み残し |
@@ -145,7 +145,7 @@ ts.save_pdf(pages, "out.pdf"); pages[0].save_png("out.png", dpi=144)
 
 ```bash
 make docs                       # C++: Doxygen（docs/Doxyfile）→ build/docs/cpp/html/index.html。DOXYGEN=path で実行ファイル指定
-make pydocs                     # Python: 型スタブ python/typeset/_typeset/ と pdoc の HTML → build/docs/python/index.html
+make pydocs                     # Python: 型スタブ python/jtypeset/_jtypeset/ と pdoc の HTML → build/docs/python/index.html
                                 #   （pip install pdoc pybind11-stubgen。ビルド済みの python パッケージを読む）
 cmake --build build/x64-windows --target docs   # Doxygen が PATH にあれば同じ
 ```

@@ -12,7 +12,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "build", "x64-windows", "python", "Release"))
-import typeset as ts  # noqa: E402
+import jtypeset as ts  # noqa: E402
 
 
 def bar_chart(req):

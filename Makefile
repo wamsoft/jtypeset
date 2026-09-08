@@ -66,11 +66,11 @@ DOXYGEN?=doxygen
 docs:
 	$(DOXYGEN) docs/Doxyfile
 
-# Python リファレンス: 型スタブ（_typeset.pyi）と pdoc の HTML → build/docs/python/index.html
+# Python リファレンス: 型スタブ（_jtypeset.pyi）と pdoc の HTML → build/docs/python/index.html
 # 事前に pip install pdoc pybind11-stubgen。ビルド済みの python パッケージを読む
 PYPKG=$(BUILD_PATH)/python/$(BUILD_TYPE)
 pydocs:
-	PYTHONPATH=$(PYPKG) pybind11-stubgen typeset._typeset -o python --ignore-all-errors
-	cp -r python/typeset/_typeset $(PYPKG)/typeset/
+	PYTHONPATH=$(PYPKG) pybind11-stubgen typeset._jtypeset -o python --ignore-all-errors
+	cp -r python/jtypeset/_jtypeset $(PYPKG)/typeset/
 	mkdir -p build/docs
 	PYTHONPATH=$(PYPKG) pdoc typeset -o build/docs/python --no-show-source

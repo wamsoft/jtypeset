@@ -1,15 +1,15 @@
 # typeset Python ガイド
 
-C++ コアの pybind11 バインディング `typeset` と、Markdown → PDF の `typeset.md` の使い方。
+C++ コアの pybind11 バインディング `typeset` と、Markdown → PDF の `jtypeset.md` の使い方。
 API の一覧（クラス・メソッド・引数）は `make pydocs` で生成する HTML（`build/docs/python/index.html`）と
-型スタブ `python/typeset/_typeset/__init__.pyi`（pybind11-stubgen で生成。IDE の補完にも使われる）を参照。C++ の概念・座標系の説明は `docs/cpp_guide.md`。
+型スタブ `python/jtypeset/_jtypeset/__init__.pyi`（pybind11-stubgen で生成。IDE の補完にも使われる）を参照。C++ の概念・座標系の説明は `docs/cpp_guide.md`。
 
 ## インストール
 
 ```bash
-pip install dist/typeset-*.whl            # ビルド済み wheel（pip wheel . -w dist --no-deps で作る。VCPKG_ROOT が要る）
-pip install "typeset[md]"                 # Markdown → PDF（markdown-it-py / mdit-py-plugins / PyYAML）
-pip install "typeset[md,highlight]"       # + Pygments（コードブロックの色付け。無くても単色で組める）
+pip install dist/jtypeset-*.whl            # ビルド済み wheel（pip wheel . -w dist --no-deps で作る。VCPKG_ROOT が要る）
+pip install "jtypeset[md]"                 # Markdown → PDF（markdown-it-py / mdit-py-plugins / PyYAML）
+pip install "jtypeset[md,highlight]"       # + Pygments（コードブロックの色付け。無くても単色で組める）
 ```
 
 開発ツリーから使うときは `PYTHONPATH=build/x64-windows/python/Release`（`typeset/` パッケージがここにまとまる）。
@@ -17,7 +17,7 @@ pip install "typeset[md,highlight]"       # + Pygments（コードブロック�
 ## 最小の例
 
 ```python
-import typeset as ts
+import jtypeset as ts
 
 fonts = ts.FontSet()
 fonts.load_file("data/NotoSerifJP-Regular.otf", "serif-ja")     # キーで引く。省略するとパスがキー
@@ -103,16 +103,16 @@ pages = ts.FlowLayouter(fonts).layout(flow, seq, objects=reg)
 print(reg.errors)                                            # 失敗したハンドラ（本文には代替テキスト）
 ```
 
-## Markdown → PDF（`typeset.md`）
+## Markdown → PDF（`jtypeset.md`）
 
 ```bash
-typeset-md report.md                                    # report.pdf
-typeset-md report.md --vertical --paper A5 --toc --font fonts/mincho.otf
-python -m typeset.md report.md -o out.pdf --png 120 --math mathtext
+jtypeset-md report.md                                    # report.pdf
+jtypeset-md report.md --vertical --paper A5 --toc --font fonts/mincho.otf
+python -m jtypeset.md report.md -o out.pdf --png 120 --math mathtext
 ```
 
 ```python
-from typeset.md import convert_file, Options
+from jtypeset.md import convert_file, Options
 pages, warnings = convert_file("report.md", "report.pdf", Options(), png_dpi=0,
                                overrides={"paper": "A5", "writing": "vertical"})
 ```
@@ -137,4 +137,4 @@ pages, warnings = convert_file("report.md", "report.pdf", Options(), png_dpi=0,
 | `footnote-marker-format` `footnote-label-format` `footnote-per-page` | 脚注の書式とページごとの番号 | `{n}` / `{n} ` / false |
 | `figure-format` `table-format` `equation-format` | 番号の書式 | 図 {n} / 表 {n} / ({n}) |
 
-対応する記法は `python/typeset/md/__init__.py` の docstring と `samples/markdown/report.md` を参照。
+対応する記法は `python/jtypeset/md/__init__.py` の docstring と `samples/markdown/report.md` を参照。

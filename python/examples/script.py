@@ -16,7 +16,7 @@ for cand in ("build/x64-windows/python/Release", "build/x64-windows/python"):
     if os.path.isdir(p):
         sys.path.insert(0, p)
 
-import typeset as ts  # noqa: E402
+import jtypeset as ts  # noqa: E402
 
 
 def main():

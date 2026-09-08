@@ -26,21 +26,21 @@ if(NOT TARGET pybind11::module)
     find_package(pybind11 CONFIG REQUIRED)
 endif()
 
-# 拡張モジュールは typeset/_typeset、純 Python の部分（typeset/__init__.py, typeset/md）は隣に置く。
-# ビルドツリーでは <build>/python/<Config>/typeset/ にまとめるので、sys.path に <build>/python/<Config> を足せば import できる
+# 拡張モジュールは jtypeset/_jtypeset、純 Python の部分（typeset/__init__.py, typeset/md）は隣に置く。
+# ビルドツリーでは <build>/python/<Config>/jtypeset/ にまとめるので、sys.path に <build>/python/<Config> を足せば import できる
 pybind11_add_module(typeset_py MODULE typeset_module.cpp)
 set_target_properties(typeset_py PROPERTIES
-    OUTPUT_NAME "_typeset"
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/typeset"
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/typeset")
+    OUTPUT_NAME "_jtypeset"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/jtypeset"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/jtypeset")
 target_link_libraries(typeset_py PRIVATE typeset)
 # 純 Python の部分は毎回コピーする（.py を直しただけでも反映されるように）
 add_custom_target(typeset_py_sources ALL
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/typeset" "$<TARGET_FILE_DIR:typeset_py>"
-    COMMENT "copy python package sources next to _typeset")
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/jtypeset" "$<TARGET_FILE_DIR:typeset_py>"
+    COMMENT "copy python package sources next to _jtypeset")
 add_dependencies(typeset_py_sources typeset_py)
 
 # scikit-build-core は install() されたものを wheel に詰める（純 Python 側は pyproject の wheel.packages）
 install(TARGETS typeset_py
-        LIBRARY DESTINATION typeset
-        RUNTIME DESTINATION typeset)
+        LIBRARY DESTINATION jtypeset
+        RUNTIME DESTINATION jtypeset)

@@ -58,9 +58,9 @@ obj/       ObjectRegistry     外部オブジェクト（数式・グラフ）�
                               (ハンドラ, ソース, パラメータ, サイズ) でキャッシュ。本体は数式の知識を持たない
            svg_import         SVG サブセット → dl（path 全コマンド・基本図形・defs/use・transform・塗り線）。
                               ベースラインは <!-- typeset baseline="pt" --> か vertical-align(ex)
-python/    typeset/           パッケージ。`_typeset`（pybind11 拡張。typeset_module.cpp）を `__init__.py` が再エクスポート。
-                              ビルドツリーでは build/<preset>/python/<Config>/typeset/ にまとまる（PYTHONPATH にその親を足す）
-           typeset/md/        Markdown → Flow → PDF（markdown-it-py）。CLI `typeset-md` / `python -m typeset.md`。
+python/    jtypeset/          パッケージ（PyPI 名 jtypeset）。`_jtypeset`（pybind11 拡張。typeset_module.cpp）を `__init__.py` が再エクスポート。
+                              ビルドツリーでは build/<preset>/python/<Config>/jtypeset/ にまとまる（PYTHONPATH にその親を足す）
+           jtypeset/md/       Markdown → Flow → PDF（markdown-it-py）。CLI `jtypeset-md` / `python -m jtypeset.md`。
                               front matter の Options、`{#label}` と `{ref:}`、脚注・数式・ルビ記法。pybind の vector 属性は
                               コピーを返すので Python 側でリストを作って代入する
 handlers/  microtex/          MicroTeX（LaTeX 数式）のサンプルハンドラ。任意ターゲット（TYPESET_HANDLER_MICROTEX、vcpkg feature microtex）。

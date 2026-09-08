@@ -14,7 +14,7 @@ math:
 
 # はじめに {#sec-intro}
 
-この文書は Markdown{index:Markdown} で書かれ、`typeset.md` で組版{index:くみはん|組版}されている。見出しは自動採番され PDF のしおりになり、
+この文書は Markdown{index:Markdown} で書かれ、`jtypeset.md` で組版{index:くみはん|組版}されている。見出しは自動採番され PDF のしおりになり、
 先頭の目次は 2 パス目で確定したページ番号を持つ。第 {ref:sec-features} 章で対応する記法を示し、
 図 {ref:fig-grad} と表 {ref:tab-syntax} を参照する例も含める。
 
@@ -40,7 +40,7 @@ math:
 ## コードブロックと表
 
 ```python
-import typeset as ts
+import jtypeset as ts
 fonts = ts.FontSet()
 fonts.load_file("data/NotoSerifJP-Regular.otf", "serif")
 flow = ts.Flow()

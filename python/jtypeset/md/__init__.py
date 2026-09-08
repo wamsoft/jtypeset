@@ -1,10 +1,10 @@
 """
-typeset.md — Markdown → typeset の Flow → PDF
+jtypeset.md — Markdown → typeset の Flow → PDF
 
-    from typeset.md import convert_file
+    from jtypeset.md import convert_file
     convert_file("report.md", "report.pdf")
 
-    python -m typeset.md report.md -o report.pdf [--vertical] [--paper A5] [--font path.otf ...]
+    python -m jtypeset.md report.md -o report.pdf [--vertical] [--paper A5] [--font path.otf ...]
 
 先頭の YAML front matter で題名・判型・書字方向・フォント・目次などを指定する（Options 参照）。
 対応する Markdown: 見出し（採番・しおり・`{#label}`）、段落（一字下げ）、箇条書き／番号付き、コードブロック、

@@ -3,13 +3,13 @@ requires = ["scikit-build-core>=0.10", "pybind11>=2.12"]
 build-backend = "scikit_build_core.build"
 
 [project]
-name = "typeset"
+name = "jtypeset"
 version = "0.1.0"
-description = "Japanese typesetting library (vertical/horizontal, JLReq) with raster / PDF / SVG backends — C++17 core with pybind11 bindings"
+description = "jtypeset: Japanese typesetting (vertical/horizontal, JLReq) with raster / PDF / SVG output and Markdown → PDF — C++17 core (typeset) with pybind11 bindings"
 readme = "README.md"
 requires-python = ">=3.9"
 authors = [{ name = "wamsoft" }]
-keywords = ["typesetting", "japanese", "vertical", "pdf", "svg", "ruby"]
+keywords = ["typesetting", "japanese", "vertical", "pdf", "svg", "ruby", "markdown", "jlreq"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -23,7 +23,7 @@ md = ["markdown-it-py>=3.0", "mdit-py-plugins>=0.4", "PyYAML>=6.0"]
 highlight = ["Pygments>=2.10"]   # コードブロックの色付け（任意。無ければ単色）
 
 [project.scripts]
-typeset-md = "typeset.md.cli:main"
+jtypeset-md = "jtypeset.md.cli:main"
 
 [tool.scikit-build]
 # vcpkg の依存（freetype / harfbuzz / libunibreak / zlib / stb）が要る。VCPKG_ROOT を設定しておけば
@@ -34,7 +34,7 @@ cmake.args = [
     "-DTYPESET_BUILD_SAMPLES=OFF",
     "-DTYPESET_BUILD_TESTS=OFF",
 ]
-wheel.packages = ["python/typeset"]
+wheel.packages = ["python/jtypeset"]
 build-dir = "build/skbuild/{wheel_tag}"
 
 [tool.scikit-build.sdist]

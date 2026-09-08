@@ -13,7 +13,7 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from .. import _typeset as ts  # 拡張モジュール
+from .. import _jtypeset as ts  # 拡張モジュール
 
 try:
     from markdown_it import MarkdownIt
@@ -22,7 +22,7 @@ try:
     from mdit_py_plugins.footnote import footnote_plugin
     from mdit_py_plugins.front_matter import front_matter_plugin
 except ImportError as e:  # pragma: no cover
-    raise ImportError("typeset.md には markdown-it-py と mdit-py-plugins が要ります: pip install typeset[md]") from e
+    raise ImportError("jtypeset.md には markdown-it-py と mdit-py-plugins が要ります: pip install jtypeset[md]") from e
 
 
 # ------------------------------------------------------------------------------
@@ -104,7 +104,7 @@ class Options:
         for k, v in d.items():
             key = k.replace("-", "_")
             if not hasattr(self, key):
-                print(f"typeset.md: unknown option '{k}' (ignored)", file=sys.stderr)
+                print(f"jtypeset.md: unknown option '{k}' (ignored)", file=sys.stderr)
                 continue
             if key in ("fonts", "font_body", "font_heading", "font_mono") and isinstance(v, str):
                 v = [v]

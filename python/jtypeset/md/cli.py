@@ -1,9 +1,9 @@
 """
-typeset-md — Markdown → PDF のコマンドライン
+jtypeset-md — Markdown → PDF のコマンドライン
 
-    typeset-md report.md                    # report.pdf
-    typeset-md report.md -o out.pdf --vertical --paper A5 --font fonts/mincho.otf
-    typeset-md report.md --png 120          # 各ページの PNG も出す
+    jtypeset-md report.md                    # report.pdf
+    jtypeset-md report.md -o out.pdf --vertical --paper A5 --font fonts/mincho.otf
+    jtypeset-md report.md --png 120          # 各ページの PNG も出す
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from .convert import Options, convert_file
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="typeset-md", description="Markdown を typeset で組版して PDF にする")
+    ap = argparse.ArgumentParser(prog="jtypeset-md", description="Markdown を typeset で組版して PDF にする")
     ap.add_argument("input", help="Markdown ファイル（先頭に YAML front matter を書ける）")
     ap.add_argument("-o", "--output", help="出力 PDF（既定: 入力と同名 .pdf）")
     ap.add_argument("--paper", help="A4 / A5 / B5 / B6 / 文庫 / 新書 / 148x210mm")
@@ -72,10 +72,10 @@ def main(argv=None) -> int:
     try:
         pages, warnings = convert_file(args.input, args.output, Options(), png_dpi=args.png, overrides=ov)
     except Exception as e:  # noqa: BLE001
-        print(f"typeset-md: {e}", file=sys.stderr)
+        print(f"jtypeset-md: {e}", file=sys.stderr)
         return 1
     for w in warnings:
-        print(f"typeset-md: warning: {w}", file=sys.stderr)
+        print(f"jtypeset-md: warning: {w}", file=sys.stderr)
     out = args.output or (args.input.rsplit(".", 1)[0] + ".pdf")
     print(f"{out}: {pages} pages")
     return 0

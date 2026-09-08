@@ -1,12 +1,12 @@
 """
-typeset — 縦書き・横書きの日本語組版ライブラリ（C++ コアの Python バインディング）
+jtypeset — 縦書き・横書きの日本語組版ライブラリ typeset の Python バインディング
 
 流れ: FontSet でフォントを開く → TextStyle / Paragraph / Flow で内容を組み立てる → PageSequence で判型・段・柱を決める
 → FlowLayouter.layout() でページ列にする → Page.save_png / save_svg、save_pdf(pages, path) で出力する。
 単位は pt（MM / CM / INCH の定数で換算）。座標はページ左上原点・y 下向き。
 本文中の {page} {pages} {title}（柱・ノンブル）、{ref:label} {page:label}（相互参照）、{fig} {table} {eq}（番号）、
 {index:よみ|用語}（索引）は FlowLayouter が置換・収集する。
-Markdown → PDF は typeset.md（typeset-md コマンド）。
+Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。
 """
 from __future__ import annotations
 import collections.abc
@@ -98,7 +98,7 @@ class BlockStyle:
     """
     ブロックの前後アキ・改ページ制御（orphans / widows / keep_with_next / keep_together / break_before / break_after）・段抜き・ラベル・背景・余白
     """
-    background: typeset._typeset.Color | None
+    background: jtypeset._jtypeset.Color | None
     break_after: BreakKind
     break_before: BreakKind
     keep_together: bool
@@ -285,7 +285,7 @@ class Flow:
         ...
     def add_column_break(self) -> None:
         ...
-    def add_heading(self, paragraph: Paragraph, level: typing.SupportsInt | typing.SupportsIndex = 1, style: typeset._typeset.BlockStyle | None = None, numbered: bool = False) -> None:
+    def add_heading(self, paragraph: Paragraph, level: typing.SupportsInt | typing.SupportsIndex = 1, style: jtypeset._jtypeset.BlockStyle | None = None, numbered: bool = False) -> None:
         ...
     def add_image(self, image_block: ImageBlock) -> None:
         ...
@@ -375,7 +375,7 @@ class ImageBlock:
     """
     align: Align
     block: BlockStyle
-    caption: typeset._typeset.Paragraph | None
+    caption: jtypeset._jtypeset.Paragraph | None
     image: Image
     placement: ImagePlacement
     size: Size
@@ -438,7 +438,7 @@ class IndexBlock:
     索引。本文の {index:用語} / {index:よみ|用語} を集めて読みの順に並べる
     """
     block: BlockStyle
-    group_style: typeset._typeset.TextStyle | None
+    group_style: jtypeset._jtypeset.TextStyle | None
     grouped: bool
     leader: bool
     page_separator: str
@@ -646,7 +646,7 @@ class ObjectBlock:
     """
     align: Align
     block: BlockStyle
-    caption: typeset._typeset.Paragraph | None
+    caption: jtypeset._jtypeset.Paragraph | None
     handler: str
     numbered: bool
     source: str
@@ -723,8 +723,8 @@ class PageMaster:
     ページマスタ: 判型・余白・段数・書字方向・柱・ノンブル・duplex
     """
     duplex: bool
-    footer: typeset._typeset.RunningText | None
-    header: typeset._typeset.RunningText | None
+    footer: jtypeset._jtypeset.RunningText | None
+    header: jtypeset._jtypeset.RunningText | None
     margin: Margins
     size: Size
     writing_mode: WritingMode
@@ -766,7 +766,7 @@ class Paragraph:
     def __init__(self) -> None:
         ...
     @typing.overload
-    def __init__(self, text: str, style: TextStyle, paragraph_style: typeset._typeset.ParagraphStyle | None = None) -> None:
+    def __init__(self, text: str, style: TextStyle, paragraph_style: jtypeset._jtypeset.ParagraphStyle | None = None) -> None:
         ...
     def add_footnote(self, note: Paragraph, marker_style: TextStyle) -> None:
         """
@@ -1019,7 +1019,7 @@ class TableBlock:
     align: Align
     block: BlockStyle
     borders: TableBorders
-    caption: typeset._typeset.Paragraph | None
+    caption: jtypeset._jtypeset.Paragraph | None
     full_width: bool
     repeat_header: bool
     def __init__(self) -> None:
@@ -1187,8 +1187,8 @@ class TextStyle:
     fill: Color
     font: FontSpec
     language: str
-    orientation: typeset._typeset.TextOrientation | None
-    stroke: typeset._typeset.Stroke | None
+    orientation: jtypeset._jtypeset.TextOrientation | None
+    stroke: jtypeset._jtypeset.Stroke | None
     @typing.overload
     def __init__(self) -> None:
         ...
@@ -1234,7 +1234,7 @@ class TocBlock:
     block: BlockStyle
     leader: bool
     style: TextStyle
-    sub_style: typeset._typeset.TextStyle | None
+    sub_style: jtypeset._jtypeset.TextStyle | None
     @typing.overload
     def __init__(self) -> None:
         ...

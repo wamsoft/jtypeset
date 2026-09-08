@@ -41,15 +41,15 @@ struct LineInfo {
 
 } // namespace
 
-PYBIND11_MODULE(_typeset, m) {
-    m.doc() = R"doc(typeset — 縦書き・横書きの日本語組版ライブラリ（C++ コアの Python バインディング）
+PYBIND11_MODULE(_jtypeset, m) {
+    m.doc() = R"doc(jtypeset — 縦書き・横書きの日本語組版ライブラリ typeset の Python バインディング
 
 流れ: FontSet でフォントを開く → TextStyle / Paragraph / Flow で内容を組み立てる → PageSequence で判型・段・柱を決める
 → FlowLayouter.layout() でページ列にする → Page.save_png / save_svg、save_pdf(pages, path) で出力する。
 単位は pt（MM / CM / INCH の定数で換算）。座標はページ左上原点・y 下向き。
 本文中の {page} {pages} {title}（柱・ノンブル）、{ref:label} {page:label}（相互参照）、{fig} {table} {eq}（番号）、
 {index:よみ|用語}（索引）は FlowLayouter が置換・収集する。
-Markdown → PDF は typeset.md（typeset-md コマンド）。)doc";
+Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
 
     m.attr("MM") = kMm;
     m.attr("INCH") = kInch;
