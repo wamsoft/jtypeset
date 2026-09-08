@@ -1570,40 +1570,131 @@ void Flower::placeTable(const block::TableBlock& table) {
         return true;
     };
 
-    // 段より高い 1 行を、段の境で分けながら置く（rowspan の無い行だけ）
-    auto placeSplitRow = [&](size_t r, bool first, bool afterHeader) {
-        struct Cursor { int para = 0; size_t charStart = 0; bool done = false; };
+    // ヘッダ行を繰り返す（新しい段の先頭）。繰り返したら true
+    auto repeatHeader = [&](size_t r) -> bool {
+        if (table.repeatHeader && headerCount > 0 && r >= headerCount) {
+            placeRows(0, headerCount - 1, true, false, true);
+            return true;
+        }
+        return false;
+    };
+
+    /**
+     * 段より高い行の塊 [r0, r1]（rowspan でつながっていてもよい）を、段の境で分けながら置く。
+     * 行単位で入るところまで置き、1 行が段に入らなければその行の途中で分ける。行をまたぐセルの内容は
+     * カーソル（段落番号・文字位置）で続きから流す。段が変わるときは表の下罫を引き、次の段でヘッダ行を繰り返して
+     * ヘッダ罫を引いてから続ける
+     */
+    auto placeSplitGroup = [&](size_t r0, size_t r1, bool first, bool afterHeader) {
+        struct Cursor { int para = 0; size_t charStart = 0; bool done = false; bool started = false; };
         std::vector<Cursor> cursors(cells.size());
-        for (size_t i = 0; i < cells.size(); ++i) cursors[i].done = (cells[i].row != r);
+        for (size_t i = 0; i < cells.size(); ++i) {
+            const GCell& g = cells[i];
+            cursors[i].done = !(g.row >= r0 && g.row <= r1);
+        }
+        auto cellEndRow = [&](const GCell& g) { return g.row + static_cast<size_t>(g.rowspan) - 1; };
+
+        size_t rr = r0;            // 次に置く行
+        Pt rowProgress = 0.0f;     // 行 rr のうち既に置いた量（行の途中で分けたとき）
         bool firstSeg = true;
-        for (int guard = 0; guard < 1000; ++guard) {
+        bool afterRepeat = false;
+        bool sameRegion = false;   // 前のセグメントと同じ段で続けている（行境界の罫は内側の太さ）
+        for (int guard = 0; guard < 10000 && rr <= r1; ++guard) {
             Region& reg = region();
-            const Pt ruleAbove = firstSeg ? (first ? b.outer : (afterHeader ? b.headerRule : b.inner)) : 0.0f;
+            const Pt ruleAbove = firstSeg ? (first ? b.outer : (afterHeader ? b.headerRule : b.inner))
+                                          : (afterRepeat ? b.headerRule : (sameRegion ? b.inner : 0.0f));
             const Pt top = reg.used;
-            const Pt avail = reg.remaining() - ruleAbove - 2.0f * pad;
-            if (avail <= 0.0f && !reg.fresh()) {
+            const Pt avail = reg.remaining() - ruleAbove;
+            if (avail <= 2.0f * pad + kEps && !reg.fresh()) {
+                bottomRule();
                 nextRegion();
                 if (aborted()) return;
+                afterRepeat = repeatHeader(rr);
+                firstSeg = false;
                 continue;
             }
-            if (firstSeg) hRuleAbove(r, top, ruleAbove, first);
+
+            // 今回のセグメントに入る行: rr の残りから順に足す。1 行も入らなければ行の途中で切る
+            std::vector<size_t> rows;           // このセグメントに（一部でも）載る行
+            std::vector<Pt> rowTop;             // 各行の（セグメント先頭からの）開始位置。rr は負になり得る
             Pt segExtent = 0.0f;
+            bool partial = false;
+            {
+                // 途中まで置いた行は、内容が終わるまで「行の途中」として扱う（測定との差で高さが足りなくなるため）
+                const Pt firstRemain = rowH[rr] - rowProgress;
+                if (rowProgress <= 0.0f && firstRemain <= avail + kEps) {
+                    rows.push_back(rr);
+                    rowTop.push_back(-rowProgress);
+                    segExtent = firstRemain;
+                    for (size_t k = rr + 1; k <= r1 && segExtent + rowH[k] <= avail + kEps; ++k) {
+                        rows.push_back(k);
+                        rowTop.push_back(segExtent);
+                        segExtent += rowH[k];
+                    }
+                } else {
+                    rows.push_back(rr);
+                    rowTop.push_back(-rowProgress);
+                    segExtent = avail;
+                    partial = true;
+                }
+            }
+            const size_t lastRow = rows.back();
+
+            // これから行を途中で分けることになり、残りが少ない（段の 30% 未満）なら次の段から始める
+            if (partial && rowProgress <= 0.0f && !reg.fresh() && avail < reg.blockExtent() * 0.3f) {
+                bottomRule();
+                nextRegion();
+                if (aborted()) return;
+                afterRepeat = repeatHeader(rr);
+                firstSeg = false;
+                sameRegion = false;
+                continue;
+            }
+
+            // 上罫: 行の境界ならセルの境界で分ける。段が変わった続き（ヘッダの後）は全幅
+            if (ruleAbove > 0.0f) hRuleAbove(rr, top, ruleAbove, (firstSeg && first) || (!firstSeg && !sameRegion));
+            // セグメント内部の行境界
+            for (size_t i = 1; i < rows.size(); ++i) hRuleAbove(rows[i], top + rowTop[i], b.inner, false);
+
+            // セル: このセグメントに箱がかかるもの
+            Pt contentMax = 0.0f;   // 行の途中で切るときの、実際に使った量
             bool remaining = false;
             for (size_t i = 0; i < cells.size(); ++i) {
                 const GCell& g = cells[i];
                 if (cursors[i].done) continue;
+                const size_t gEnd = cellEndRow(g);
+                if (g.row > lastRow || gEnd < rr) continue;
+                // 箱のセグメント内での範囲
+                Pt boxTop = 0.0f;
+                if (g.row > rr) boxTop = rowTop[g.row - rr];
+                Pt boxEnd = segExtent;
+                bool endsHere = false;
+                if (gEnd <= lastRow && !(partial && gEnd == rr)) {
+                    const size_t idx = gEnd - rr;
+                    boxEnd = rowTop[idx] + rowH[gEnd];
+                    endsHere = true;
+                }
+                boxTop = std::max(boxTop, 0.0f);
+                boxEnd = std::min(boxEnd, segExtent);
                 const Pt cellWidth = colStart[g.col + g.colspan] - colStart[g.col] - 2.0f * pad;
-                Pt off = pad;
+                Pt off = boxTop + (cursors[i].started ? 0.0f : pad);
+                if (!cursors[i].started && endsHere) {
+                    Pt spanExtent = 0.0f;
+                    for (int dr = 0; dr < g.rowspan; ++dr) spanExtent += rowH[g.row + dr];
+                    off += valignOffset(g, spanExtent);
+                }
+                const Pt limit = boxEnd - (endsHere ? pad : 0.0f);
+                cursors[i].started = true;
                 while (cursors[i].para < static_cast<int>(g.cell->paras.size())) {
                     const inl::Paragraph p = resolved(g.cell->paras[cursors[i].para]);
                     const Pt pitch = p.style.resolvedLinePitch(p.baseStyle().size);
-                    const int fit = static_cast<int>(std::floor((avail - off + pad + kEps) / pitch));
+                    const int fit = static_cast<int>(std::floor((limit - off + kEps) / pitch));
                     if (fit <= 0) break;
                     const inl::ConstantLineShape shape(std::max(1.0f, cellWidth));
                     const inl::ParagraphFragment frag =
-                        layoutFitting(p, shape, cursors[i].charStart, fit, avail - off + pad);
+                        layoutFitting(p, shape, cursors[i].charStart, fit, limit - off);
                     if (frag.lines.empty()) break;
-                    const Point origin = reg.lineOrigin(off, pitch, colStart[g.col] + pad);
+                    const Point origin = reg.lineOrigin(top - reg.used + off, pitch, colStart[g.col] + pad);
                     inl::emitParagraph(page().dl, frag, wm(), origin);
                     off += frag.blockExtent();
                     if (frag.complete) {
@@ -1615,21 +1706,45 @@ void Flower::placeTable(const block::TableBlock& table) {
                     }
                 }
                 if (cursors[i].para >= static_cast<int>(g.cell->paras.size())) cursors[i].done = true;
+                else if (endsHere) cursors[i].done = true;   // 箱が終わるのに残った（測定との差）: 切り捨て
                 else remaining = true;
-                segExtent = std::max(segExtent, off + pad);
+                contentMax = std::max(contentMax, off + pad);
             }
-            if (remaining) segExtent = std::max(segExtent, avail + 2.0f * pad);
-            vRules(r, top, top + segExtent);
+
+            // 行の途中で切ったセグメント: 残りが無ければ実際に使った量で行を終える
+            if (partial && !remaining) {
+                segExtent = std::max(contentMax, 0.0f);
+                partial = false;
+            }
+            // 縦罫（行ごとに、セグメント内の範囲だけ）
+            for (size_t i = 0; i < rows.size(); ++i) {
+                const Pt b0 = std::max(rowTop[i], 0.0f);
+                const Pt b1 = std::min(rowTop[i] + rowH[rows[i]], segExtent);
+                vRules(rows[i], top + b0, top + std::max(b1, (i + 1 == rows.size()) ? segExtent : b1));
+            }
             reg.used = top + segExtent;
             pageHasContent_ = true;
-            firstSeg = false;
-            if (!remaining) return;
+
+            if (partial) {
+                rowProgress += segExtent;
+            } else {
+                rr = lastRow + 1;
+                rowProgress = 0.0f;
+            }
+            if (rr > r1) return;
+            if (!partial && region().remaining() > 2.0f * pad + kEps) {
+                // 同じ段に次の行を続ける
+                firstSeg = false;
+                afterRepeat = false;
+                sameRegion = true;
+                continue;
+            }
             bottomRule();
             nextRegion();
             if (aborted()) return;
-            if (table.repeatHeader && headerCount > 0 && r >= headerCount) {
-                placeRows(0, headerCount - 1, true, false, true);
-            }
+            afterRepeat = repeatHeader(rr);
+            firstSeg = false;
+            sameRegion = false;
         }
     };
 
@@ -1665,38 +1780,38 @@ void Flower::placeTable(const block::TableBlock& table) {
     bool prevHeader = false;
     for (size_t r = 0; r < nrow;) {
         const size_t r1 = std::max(groupEnd[r], r);
-        bool hasRowspanStart = false;
-        for (const GCell& g : cells) if (g.row == r && g.rowspan > 1) hasRowspanStart = true;
         const Pt groupExtent = [&]() { Pt e = 0.0f; for (size_t k = r; k <= r1; ++k) e += rowH[k]; return e; }();
         const bool tooTall = groupExtent + b.outer > region().blockExtent();
 
-        if (r1 == r && !hasRowspanStart && tooTall) {
+        if (placeRows(r, r1, first, prevHeader, false)) {
+            // 残りに入った
+        } else if (!tooTall) {
+            // 新しい段には丸ごと入る
+            bottomRule();
+            nextRegion();
+            if (aborted()) return;
+            first = true;
+            prevHeader = false;
+            if (repeatHeader(r)) {
+                first = false;
+                prevHeader = true;
+            }
+            placeRows(r, r1, first, prevHeader, true);
+        } else {
+            // 段より高い: 残りが少なければ次の段から、そうでなければここから分けて置く
             if (!region().fresh() && region().remaining() < region().blockExtent() * 0.3f) {
                 bottomRule();
                 nextRegion();
                 if (aborted()) return;
                 first = true;
                 prevHeader = false;
-                if (table.repeatHeader && headerCount > 0 && r >= headerCount) {
-                    placeRows(0, headerCount - 1, true, false, true);
+                if (repeatHeader(r)) {
                     first = false;
                     prevHeader = true;
                 }
             }
-            placeSplitRow(r, first, prevHeader);
+            placeSplitGroup(r, r1, first, prevHeader);
             if (aborted()) return;
-        } else if (!placeRows(r, r1, first, prevHeader, false)) {
-            bottomRule();
-            nextRegion();
-            if (aborted()) return;
-            first = true;
-            prevHeader = false;
-            if (table.repeatHeader && headerCount > 0 && r >= headerCount) {
-                placeRows(0, headerCount - 1, true, false, true);
-                first = false;
-                prevHeader = true;
-            }
-            placeRows(r, r1, first, prevHeader, true);
         }
         first = false;
         prevHeader = table.rows[r1].header;

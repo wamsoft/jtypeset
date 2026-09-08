@@ -830,3 +830,79 @@ TEST_CASE("FlowLayouter: index collects {index:} markers with pages and sorts by
     }
     CHECK(rubyX < firstX + 12.0f);
 }
+
+TEST_CASE("FlowLayouter: a rowspan group taller than the page is split, header repeats with its rule") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+
+    page::PageSequence seq;
+    seq.master.size = Size{320, 220};
+    seq.master.margin = page::Margins{20, 20, 20, 20};
+    seq.master.writingMode = WritingMode::HorizontalTb;
+
+    block::TableBlock t;
+    t.columns = {block::TableColumn{60.0f}, block::TableColumn{0.0f}};
+    auto cell = [&](std::u16string s, int rowspan = 1) {
+        block::TableCell c;
+        inl::Paragraph p = inl::Paragraph::plain(std::move(s), fx.style(9.0f));
+        p.style.lineHeight = 1.4f;
+        c.paras.push_back(p);
+        c.rowspan = rowspan;
+        return c;
+    };
+    block::TableRow head;
+    head.header = true;
+    head.cells = {cell(u"区分"), cell(u"説明")};
+    t.rows.push_back(head);
+    // 左のセルが 3 行にわたる。右の 3 行はそれぞれ長く、塊全体は 1 ページより高い
+    std::u16string longText;
+    for (int i = 0; i < 30; ++i) longText += u"長い説明の文章。";
+    block::TableRow r1;
+    r1.cells = {cell(u"共通", 3), cell(longText)};
+    block::TableRow r2;
+    r2.cells = {cell(longText)};
+    block::TableRow r3;
+    r3.cells = {cell(u"最後の行の説明。")};
+    t.rows = {head, r1, r2, r3};
+    block::TableRow r4;
+    r4.cells = {cell(u"次"), cell(u"塊の後の行。")};
+    t.rows.push_back(r4);
+
+    block::Flow flow;
+    flow.addTable(t);
+    page::FlowLayouter layouter(fx.fonts);
+    const auto pages = layouter.layout(flow, seq);
+    REQUIRE(pages.size() >= 2);
+
+    const uint32_t gNaga = fx.jp->glyphIndex(U'長');
+    const uint32_t gKubun = fx.jp->glyphIndex(U'区');
+    const uint32_t gTsugi = fx.jp->glyphIndex(U'次');
+    const uint32_t gKyou = fx.jp->glyphIndex(U'共');
+    int naga = 0, kubun = 0, tsugi = 0, kyou = 0;
+    for (const page::Page& pg : pages) {
+        const Rect body = seq.master.bodyRect(pg.number);
+        CHECK(glyphsWithin(pg.dl, body, 12.0f));
+        int kubunHere = 0;
+        for (const dl::Item& item : pg.dl.items) {
+            if (const auto* run = std::get_if<dl::GlyphRun>(&item)) {
+                for (const dl::Glyph& g : run->glyphs) {
+                    if (g.gid == gNaga) ++naga;
+                    if (g.gid == gKubun) { ++kubun; ++kubunHere; }
+                    if (g.gid == gTsugi) ++tsugi;
+                    if (g.gid == gKyou) ++kyou;
+                }
+            }
+            if (const auto* r = std::get_if<dl::RectItem>(&item)) {
+                CHECK(r->rect.x >= body.x - 1.0f);
+                CHECK(r->rect.right() <= body.right() + 1.0f);
+                CHECK(r->rect.y >= body.y - 1.0f);
+                CHECK(r->rect.bottom() <= body.bottom() + 1.0f);
+            }
+        }
+        CHECK(kubunHere == 1);   // ヘッダは各ページに 1 回
+    }
+    CHECK(naga == 60);           // 長い文章 2 セル × 30 回、失われない
+    CHECK(kubun == static_cast<int>(pages.size()));
+    CHECK(tsugi == 1);
+    CHECK(kyou == 1);            // rowspan セルの内容は 1 回
+}
