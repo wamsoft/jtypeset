@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "typeset",
+  "version": "0.1.0",
+  "description": "Japanese typesetting library (vertical/horizontal, JLReq) with raster / PDF / SVG backends",
+  "dependencies": [
+    {
+      "name": "freetype",
+      "features": ["png", "zlib"]
+    },
+    "harfbuzz",
+    "libunibreak",
+    "zlib",
+    "stb",
+    "doctest"
+  ]
+}

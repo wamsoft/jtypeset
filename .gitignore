@@ -1,0 +1,14 @@
+build/
+.vscode/
+.claude/
+.venv/
+__pycache__/
+*.egg-info/
+out/
+output*.png
+output*.bmp
+output*.pdf
+output*.svg
+data/*.ttf
+data/*.otf
+build_configure.log
