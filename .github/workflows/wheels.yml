@@ -73,11 +73,16 @@ jobs:
           # Windows / macOS: ホストの vcpkg
           CIBW_ENVIRONMENT_WINDOWS: VCPKG_ROOT='${{ github.workspace }}\vcpkg'
           CIBW_ENVIRONMENT_MACOS: VCPKG_ROOT='${{ github.workspace }}/vcpkg' MACOSX_DEPLOYMENT_TARGET=11.0
-          # Linux: コンテナ内に vcpkg を入れる
-          # vcpkg は浅いクローンにしない（manifest の builtin-baseline のコミットを git で参照するため）
+          # Linux: コンテナ内に vcpkg を入れる。vcpkg.json の builtin-baseline のコミットだけを浅く取って
+          # チェックアウトする（Windows / macOS の run-vcpkg と同じコミットになり、再現性が揃う）
           CIBW_BEFORE_ALL_LINUX: >
             yum install -y curl zip unzip tar perl-IPC-Cmd ninja-build autoconf automake libtool pkgconfig &&
-            git clone https://github.com/microsoft/vcpkg.git /opt/vcpkg &&
+            BASE=$(grep -oP '"builtin-baseline":\s*"\K[0-9a-f]+' vcpkg.json) &&
+            echo "vcpkg baseline: $BASE" &&
+            git init /opt/vcpkg &&
+            git -C /opt/vcpkg remote add origin https://github.com/microsoft/vcpkg.git &&
+            git -C /opt/vcpkg fetch --depth 1 origin "$BASE" &&
+            git -C /opt/vcpkg checkout FETCH_HEAD &&
             /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics
           CIBW_ENVIRONMENT_LINUX: VCPKG_ROOT=/opt/vcpkg VCPKG_FORCE_SYSTEM_BINARIES=1
           CIBW_TEST_REQUIRES: markdown-it-py mdit-py-plugins PyYAML
