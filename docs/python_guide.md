@@ -98,7 +98,7 @@ def bars(req):                                               # Python 関数で�
     return {"svg": "<svg ...>", "baseline": 20.0}
 reg.add("bars", bars)
 
-p.add_object("tex", r"rac{a}{b}", body)                    # 行内の数式（ベースライン揃え）
+p.add_object("tex", r"\frac{a}{b}", body)                    # 行内の数式（ベースライン揃え）
 p.add_object("bars", "3,5,2", body, {"width": "60"})         # 行内のグラフ
 flow.add_object(ts.ObjectBlock("plot", "sin,cos", body, {"width": "300"}, numbered=True))   # 別行立て＋式番号
 pages = ts.FlowLayouter(fonts).layout(flow, seq, objects=reg)
