@@ -52,6 +52,7 @@ struct Annotation {
     RubyMode rubyMode = RubyMode::Group;
     float scale = 0.5f;             ///< ルビ・割注・圏点の文字サイズ倍率
     EmphasisMark mark = EmphasisMark::Sesame;
+    bool oppositeSide = false;      ///< 圏点を注記側の反対（縦組み: 左、横組み: 下）に付ける
     float jidoriEm = 0.0f;          ///< 字取りの長さ（em）
 
     static Annotation ruby(size_t start, size_t end, std::u16string text,
@@ -71,12 +72,14 @@ struct Annotation {
         return a;
     }
     static Annotation emphasis(size_t start, size_t end,
-                               EmphasisMark mark = EmphasisMark::Sesame, float scale = 0.5f) {
+                               EmphasisMark mark = EmphasisMark::Sesame, float scale = 0.5f,
+                               bool oppositeSide = false) {
         Annotation a;
         a.type = AnnotationType::Emphasis;
         a.start = start; a.end = end;
         a.mark = mark;
         a.scale = scale;
+        a.oppositeSide = oppositeSide;
         return a;
     }
     static Annotation warichu(size_t start, size_t end, std::u16string text, float scale = 0.5f) {

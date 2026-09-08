@@ -648,3 +648,109 @@ TEST_CASE("FlowLayouter: footnotes push body text to the next page instead of ov
     }
     CHECK(n4 == 1);
 }
+
+TEST_CASE("FlowLayouter: vertical table keeps header column at the right and glyphs inside the body") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+
+    page::PageSequence seq;
+    seq.master.size = Size{320, 300};
+    seq.master.margin = page::Margins{20, 20, 20, 20};
+    seq.master.writingMode = WritingMode::VerticalRl;
+
+    block::TableBlock t;
+    t.columns = {block::TableColumn{0.0f}, block::TableColumn{0.0f}};
+    auto cell = [&](std::u16string s) {
+        block::TableCell c;
+        c.paras.push_back(inl::Paragraph::plain(std::move(s), fx.style(9.0f)));
+        return c;
+    };
+    block::TableRow head;
+    head.header = true;
+    head.cells = {cell(u"項目"), cell(u"値")};
+    t.rows.push_back(head);
+    for (const char16_t* name : {u"行一", u"行二", u"行三", u"行四"}) {
+        block::TableRow r;
+        r.cells = {cell(name), cell(u"内容の文章")};
+        t.rows.push_back(r);
+    }
+    block::Flow flow;
+    flow.addParagraph(inl::Paragraph::plain(u"縦組みの表。", fx.style(10.0f)));
+    flow.addTable(t);
+    flow.addParagraph(inl::Paragraph::plain(u"表の後の段落。", fx.style(10.0f)));
+
+    page::FlowLayouter layouter(fx.fonts);
+    const auto pages = layouter.layout(flow, seq);
+    REQUIRE(pages.size() == 1);
+    const Rect body = seq.master.bodyRect(1);
+    CHECK(glyphsWithin(pages[0].dl, body, 10.0f));
+
+    // ヘッダ（項目）は最初の行 = 一番右。「行一」…「行四」は左へ進む
+    auto xOf = [&](char32_t c) {
+        const uint32_t gid = fx.jp->glyphIndex(c);
+        float x = -1.0f;
+        for (const dl::Item& item : pages[0].dl.items) {
+            if (const auto* run = std::get_if<dl::GlyphRun>(&item)) {
+                for (const dl::Glyph& g : run->glyphs) if (g.gid == gid && run->size == doctest::Approx(9.0f)) x = g.pos.x;
+            }
+        }
+        return x;
+    };
+    const float xHead = xOf(U'項'), x1 = xOf(U'一'), x4 = xOf(U'四');
+    REQUIRE(xHead > 0.0f);
+    REQUIRE(x1 > 0.0f);
+    REQUIRE(x4 > 0.0f);
+    CHECK(xHead > x1);
+    CHECK(x1 > x4);
+    // 罫線（矩形）は版面内
+    for (const dl::Item& item : pages[0].dl.items) {
+        if (const auto* r = std::get_if<dl::RectItem>(&item)) {
+            CHECK(r->rect.x >= body.x - 1.0f);
+            CHECK(r->rect.right() <= body.right() + 1.0f);
+        }
+    }
+}
+
+TEST_CASE("FlowLayouter: keepWithNext carries a rule between heading and paragraph") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+
+    page::PageSequence seq;
+    seq.master.size = Size{300, 220};
+    seq.master.margin = page::Margins{20, 20, 20, 20};
+    seq.master.writingMode = WritingMode::HorizontalTb;
+
+    block::Flow flow;
+    // 段の下端近くまで埋める
+    for (int i = 0; i < 7; ++i) flow.addParagraph(inl::Paragraph::plain(u"埋め草の段落。", fx.style(10.0f)));
+    block::BlockStyle hs;
+    hs.keepWithNext = true;
+    flow.addHeading(inl::Paragraph::plain(u"見出し", fx.style(14.0f)), 1, hs);
+    flow.addRule(1.0f, Color::rgb(200, 0, 0));
+    std::u16string body;
+    for (int i = 0; i < 8; ++i) body += u"見出しの後の本文。";
+    block::BlockStyle ps;
+    ps.keepTogether = true;   // 段落全体が残りに入らないので次のページへ → 見出しと罫線も一緒に移る
+    flow.addParagraph(inl::Paragraph::plain(body, fx.style(10.0f)), ps);
+
+    page::FlowLayouter layouter(fx.fonts);
+    const auto pages = layouter.layout(flow, seq);
+    REQUIRE(pages.size() == 2);
+    // 見出し（14pt）と赤い罫線は本文と同じ 2 ページ目にあり、1 ページ目には残らない
+    auto hasHeading = [&](const page::Page& pg) {
+        for (const dl::Item& item : pg.dl.items) {
+            if (const auto* run = std::get_if<dl::GlyphRun>(&item)) if (run->size == doctest::Approx(14.0f)) return true;
+        }
+        return false;
+    };
+    auto hasRedRule = [&](const page::Page& pg) {
+        for (const dl::Item& item : pg.dl.items) {
+            if (const auto* r = std::get_if<dl::RectItem>(&item)) if (r->fill.r == 200 && r->fill.g == 0) return true;
+        }
+        return false;
+    };
+    CHECK_FALSE(hasHeading(pages[0]));
+    CHECK_FALSE(hasRedRule(pages[0]));
+    CHECK(hasHeading(pages[1]));
+    CHECK(hasRedRule(pages[1]));
+}

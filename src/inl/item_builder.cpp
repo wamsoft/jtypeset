@@ -326,7 +326,8 @@ CompositeResult layoutWarichu(const std::u16string& content, const ItemBuildCont
 //------------------------------------------------------------------------------
 
 bool layoutEmphasisMark(EmphasisMark mark, const ItemBuildContext& ctx, Pt em, Pt markSize,
-                        Pt parentWidth, uint32_t styleIndex, std::vector<PlacedGlyph>& out) {
+                        Pt parentWidth, uint32_t styleIndex, std::vector<PlacedGlyph>& out,
+                        float side) {
     std::u16string t;
     text::appendCodePoint(t, emphasisMarkCodePoint(mark));
     const TextStyle markStyle = derivedStyle(ctx, markSize);
@@ -336,7 +337,6 @@ bool layoutEmphasisMark(EmphasisMark mark, const ItemBuildContext& ctx, Pt em, P
 
     // 圏点は字面（インク）の中心を親文字の中央に合わせる。ゴマ点 U+FE45 は縦組み用の
     // 字形で、横組みでは em box の中で字面が偏っているため、送りではなく字面で揃える
-    const float side = annotationSide(ctx.writingMode);
     const Pt targetBlock = side * (em * 0.5f + markSize * 0.5f);
     const Pt targetInline = parentWidth * 0.5f;
     const bool vertical = isVertical(ctx.writingMode);
@@ -596,9 +596,9 @@ std::vector<LineItem> buildLineItems(const ShapedText& shaped,
         }
         case AnnotationType::Emphasis: {
             const Pt markSize = em * r.ann->scale;
-            const float side = annotationSide(ctx.writingMode);
+            const float side = annotationSide(ctx.writingMode) * (r.ann->oppositeSide ? -1.0f : 1.0f);
             for (uint32_t k : parents) {
-                if (layoutEmphasisMark(r.ann->mark, ctx, em, markSize, bodyWidths[k], si, attached[k])) {
+                if (layoutEmphasisMark(r.ann->mark, ctx, em, markSize, bodyWidths[k], si, attached[k], side)) {
                     if (side > 0.0f) extentMax[k] = std::max(extentMax[k], em * 0.5f + markSize);
                     else             extentMin[k] = std::min(extentMin[k], -(em * 0.5f + markSize));
                 }

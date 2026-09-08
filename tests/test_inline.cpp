@@ -234,3 +234,66 @@ TEST_CASE("jukugo ruby: overhang within the compound, fallback to group when too
         }
     }
 }
+
+TEST_CASE("ruby at line head / line end does not protrude outside the line") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+    const TextStyle body = fx.style(10.0f);
+    // 4 字で改行し、2 行目の先頭に長いルビ（6 字 × 0.5 = 3em > 2em）が来る
+    inl::Paragraph p = inl::Paragraph::plain(u"ああああ漢字ああああ", body);
+    p.annotations.push_back(inl::Annotation::ruby(4, 6, u"かんじかんじ"));
+    p.style.spacing.punctuationSpacing = true;
+    inl::ParagraphLayouter layouter(fx.fonts);
+    for (WritingMode wm : {WritingMode::HorizontalTb, WritingMode::VerticalRl}) {
+        const inl::ConstantLineShape shape(40.0f);
+        const inl::ParagraphFragment frag = layouter.layout(p, wm, shape);
+        REQUIRE(frag.lines.size() >= 2);
+        const inl::LineBox& l1 = frag.lines[1];
+        Pt rubyMin = 1e9f, rubyMax = -1e9f;
+        int rubyGlyphs = 0;
+        for (const inl::PlacedGlyph& g : l1.glyphs) {
+            if (g.size < 9.0f) {   // ルビ（5pt）
+                rubyMin = std::min(rubyMin, g.inline_);
+                rubyMax = std::max(rubyMax, g.inline_ + g.advance);
+                ++rubyGlyphs;
+            }
+        }
+        REQUIRE(rubyGlyphs == 6);
+        CHECK(rubyMin >= -0.01f);          // 行頭より前へ出ない
+        CHECK(rubyMax <= 40.0f + 0.01f);   // 行末より後ろへ出ない
+    }
+    // 行末に来る場合: 先頭 2 字 + 漢字 で 4 字ちょうど、ルビは行末側へ 0.5em 掛かろうとする
+    inl::Paragraph q = inl::Paragraph::plain(u"ああ漢字ああああ", body);
+    q.annotations.push_back(inl::Annotation::ruby(2, 4, u"かんじかんじ"));
+    const inl::ConstantLineShape shape(40.0f);
+    const inl::ParagraphFragment frag = layouter.layout(q, WritingMode::HorizontalTb, shape);
+    REQUIRE(frag.lines.size() >= 2);
+    Pt rubyMax = -1e9f;
+    for (const inl::PlacedGlyph& g : frag.lines[0].glyphs) {
+        if (g.size < 9.0f) rubyMax = std::max(rubyMax, g.inline_ + g.advance);
+    }
+    CHECK(rubyMax <= frag.lines[0].length + 0.01f);
+}
+
+TEST_CASE("emphasis marks can be placed on the opposite side") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+    inl::Paragraph p = inl::Paragraph::plain(u"強調する文字", fx.style(10.0f));
+    p.annotations.push_back(inl::Annotation::emphasis(0, 2));
+    p.annotations.push_back(inl::Annotation::emphasis(2, 4, inl::EmphasisMark::Sesame, 0.5f, true));
+    inl::ParagraphLayouter layouter(fx.fonts);
+    const inl::ConstantLineShape shape(200.0f);
+    for (WritingMode wm : {WritingMode::HorizontalTb, WritingMode::VerticalRl}) {
+        const inl::ParagraphFragment frag = layouter.layout(p, wm, shape);
+        REQUIRE(frag.lines.size() == 1);
+        std::vector<Pt> marks;
+        for (const inl::PlacedGlyph& g : frag.lines[0].glyphs) if (g.size < 9.0f) marks.push_back(g.block);
+        REQUIRE(marks.size() == 4);
+        const float side = inl::annotationSide(wm);
+        // 最初の 2 つは注記側、次の 2 つは反対側
+        CHECK(marks[0] * side > 0.0f);
+        CHECK(marks[1] * side > 0.0f);
+        CHECK(marks[2] * side < 0.0f);
+        CHECK(marks[3] * side < 0.0f);
+    }
+}

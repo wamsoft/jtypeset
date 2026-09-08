@@ -195,7 +195,8 @@ PYBIND11_MODULE(_typeset, m) {
                     py::arg("mode") = inl::RubyMode::Group, py::arg("scale") = 0.5f)
         .def_static("tate_chu_yoko", &inl::Annotation::tateChuYoko, py::arg("start"), py::arg("end"))
         .def_static("emphasis", &inl::Annotation::emphasis, py::arg("start"), py::arg("end"),
-                    py::arg("mark") = inl::EmphasisMark::Sesame, py::arg("scale") = 0.5f)
+                    py::arg("mark") = inl::EmphasisMark::Sesame, py::arg("scale") = 0.5f,
+                    py::arg("opposite_side") = false)
         .def_static("warichu", &inl::Annotation::warichu, py::arg("start"), py::arg("end"),
                     py::arg("text") = std::u16string(), py::arg("scale") = 0.5f)
         .def_static("jidori", &inl::Annotation::jidori, py::arg("start"), py::arg("end"), py::arg("em"));
@@ -448,7 +449,8 @@ PYBIND11_MODULE(_typeset, m) {
         .def(py::init([](inl::Paragraph p, Pt offset) { return page::RunningText{std::move(p), offset}; }),
              py::arg("paragraph"), py::arg("offset") = 0.0f)
         .def_readwrite("paragraph", &page::RunningText::para)
-        .def_readwrite("offset", &page::RunningText::offset);
+        .def_readwrite("offset", &page::RunningText::offset)
+        .def_readwrite("mirror_on_even", &page::RunningText::mirrorOnEven);
     py::class_<page::PageMaster>(m, "PageMaster")
         .def(py::init<>())
         .def_readwrite("size", &page::PageMaster::size)

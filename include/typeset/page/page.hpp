@@ -43,6 +43,8 @@ struct RunningText {
     inl::Paragraph para;
     /// 版面の端から行の中心線までの距離（上の柱は版面上端から上へ、下は下端から下へ）
     Pt offset = 0.0f;
+    /// 見開き（duplex）で偶数ページの揃えを左右反転する（柱・ノンブルを小口側に置く）
+    bool mirrorOnEven = false;
 };
 
 struct PageMaster {

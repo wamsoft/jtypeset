@@ -239,6 +239,8 @@ ParagraphFragment ParagraphLayouter::layoutOnce(const Paragraph& para, WritingMo
                 }
 
                 Pt v = 0.0f;
+                // 行頭・行末のルビの掛かり抑制用: Box に付いた注記グリフ（ルビ・圏点）の範囲
+                std::vector<std::pair<size_t, size_t>> attached;
                 for (uint32_t i = br.itemStart; i < br.itemEnd; ++i) {
                     const LineItem& item = items[i];
                     if (item.isGlue()) {
@@ -262,15 +264,30 @@ ParagraphFragment ParagraphLayouter::layoutOnce(const Paragraph& para, WritingMo
                             line.blockMax = std::max(line.blockMax, shaped.blockMax);
                         }
                     }
+                    const size_t attBegin = line.glyphs.size();
                     for (PlacedGlyph glyph : item.glyphs) {
                         glyph.inline_ += v;
                         glyph.charIndex += static_cast<uint32_t>(pos);
                         line.glyphs.push_back(std::move(glyph));
                     }
+                    if (!item.ownGlyphs && !item.glyphs.empty()) attached.emplace_back(attBegin, line.glyphs.size());
                     line.blockMin = std::min(line.blockMin, item.extentMin);
                     line.blockMax = std::max(line.blockMax, item.extentMax);
                     line.charEnd = pos + cluster.charEnd;
                     v += item.width;
+                }
+                // 行頭・行末ではルビを行の外へ掛けない（JLReq 3.3.6）: 行からはみ出す注記はそのぶん内側へずらす
+                // （行の途中の掛かりは隣の字の上なので触らない）
+                for (const auto& [b, e] : attached) {
+                    Pt mn = 0.0f, mx = v;
+                    for (size_t g = b; g < e; ++g) {
+                        mn = std::min(mn, line.glyphs[g].inline_);
+                        mx = std::max(mx, line.glyphs[g].inline_ + line.glyphs[g].advance);
+                    }
+                    Pt shift = 0.0f;
+                    if (mn < 0.0f) shift = -mn;
+                    else if (mx > v) shift = v - mx;
+                    if (shift != 0.0f) for (size_t g = b; g < e; ++g) line.glyphs[g].inline_ += shift;
                 }
                 computeExtraLeading(line, frag.linePitch, isVertical(wm));
                 frag.lines.push_back(std::move(line));

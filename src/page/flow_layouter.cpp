@@ -419,6 +419,10 @@ void Flower::layoutRunning(const RunningText& rt, bool top) {
     inl::Paragraph p = para;
     p.style.firstLineIndent = 0.0f;
     if (p.style.align == Align::Justify) p.style.align = Align::Start;
+    if (rt.mirrorOnEven && master().duplex && page().number % 2 == 0) {
+        if (p.style.align == Align::Start) p.style.align = Align::End;
+        else if (p.style.align == Align::End) p.style.align = Align::Start;
+    }
     const inl::ConstantLineShape shape(body.w);
     const inl::ParagraphFragment frag = layouter_.layout(p, WritingMode::HorizontalTb, shape);
     if (frag.lines.empty()) return;
@@ -589,7 +593,11 @@ void Flower::placeBlock(const block::Block& blk, const PageStart* resume) {
         pending_->blk = &blk;
         pending_->blockIndex = curBlockIndex_;
     } else if (!style->keepWithNext) {
-        pending_.reset();
+        // 罫線・スペーサーは保留を通す（見出し＋罫線＋段落を一緒に巻き取る）。巻き戻しでは
+        // 保留ブロックからこのブロックまでを置き直す
+        const bool transparent = std::holds_alternative<block::RuleBlock>(blk) ||
+                                 std::holds_alternative<block::SpacerBlock>(blk);
+        if (!(transparent && pending_ && pending_->blk)) pending_.reset();
     }
 }
 
@@ -949,7 +957,7 @@ void Flower::placeRule(const block::RuleBlock& r) {
     fillLogicalRect(r.inset, L - r.inset, reg.used, reg.used + r.thickness, r.color);
     reg.used += r.thickness;
     pageHasContent_ = true;
-    pending_.reset();
+    // 罫線は keepWithNext を通す（見出し＋罫線＋段落を一緒に巻き取れる）。保留はそのまま
     applySpaceAfter(r.block.spaceAfter);
 }
 
@@ -1673,7 +1681,10 @@ void Flower::flowParagraph(const inl::Paragraph& paraIn, const block::BlockStyle
                 } else {
                     nextRegion();
                 }
-                if (!aborted()) placeBlock(*pend.blk);
+                // 保留ブロックと、その後ろに続いた罫線・スペーサー（keepWithNext を通したもの）を置き直す
+                for (size_t b = pend.blockIndex; b < myBlock && !aborted(); ++b) {
+                    placeBlock(b == pend.blockIndex ? *pend.blk : flow_.blocks[b]);
+                }
                 pending_.reset();
                 curBlockIndex_ = myBlock;
                 curParaIndex_ = myPara;
