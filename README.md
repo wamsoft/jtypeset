@@ -96,7 +96,8 @@ pip install dist/typeset-*.whl
 ### Markdown → PDF（`typeset.md`）
 
 ```bash
-pip install "typeset[md]"            # markdown-it-py / mdit-py-plugins / PyYAML / Pygments
+pip install "typeset[md]"            # markdown-it-py / mdit-py-plugins / PyYAML
+pip install "typeset[md,highlight]"  # + Pygments（コードブロックの色付け。無くても単色で組める）
 typeset-md report.md                 # report.pdf
 typeset-md report.md --vertical --paper A5 --font fonts/mincho.otf --toc
 python -m typeset.md report.md -o out.pdf --png 120 --math mathtext   # 数式は matplotlib の mathtext（任意）

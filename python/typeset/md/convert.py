@@ -531,7 +531,8 @@ class Converter:
         self.flow.add_paragraph(p, bs)
 
     def _highlight(self, p: Any, text: str, lang: str) -> bool:
-        """Pygments があれば fence の言語名に応じて色を付ける（opts.highlight が False なら使わない）"""
+        """Pygments があれば fence の言語名に応じて色を付ける（opts.highlight が False なら使わない）。
+        Pygments が無い・言語名が無い・不明な言語なら False を返し、呼び出し側が単色で組む"""
         if not self.opts.highlight or not lang:
             return False
         try:

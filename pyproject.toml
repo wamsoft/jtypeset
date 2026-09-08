@@ -19,7 +19,8 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-md = ["markdown-it-py>=3.0", "mdit-py-plugins>=0.4", "PyYAML>=6.0", "Pygments>=2.10"]
+md = ["markdown-it-py>=3.0", "mdit-py-plugins>=0.4", "PyYAML>=6.0"]
+highlight = ["Pygments>=2.10"]   # コードブロックの色付け（任意。無ければ単色）
 
 [project.scripts]
 typeset-md = "typeset.md.cli:main"
