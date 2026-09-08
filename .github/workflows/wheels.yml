@@ -39,10 +39,16 @@ jobs:
             arch: AMD64
           - os: ubuntu-latest
             arch: x86_64
+          # macOS は Apple Silicon のランナーで両アーキテクチャを作る（Intel ランナー macos-13 は少なく待ちが長い）。
+          # x86_64 は cibuildwheel のクロスビルド。vcpkg の依存も triplet を x64-osx にして x86_64 で作る
           - os: macos-14
             arch: arm64
-          - os: macos-13
+            triplet: arm64-osx
+            cmake_arch: arm64
+          - os: macos-14
             arch: x86_64
+            triplet: x64-osx
+            cmake_arch: x86_64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -72,7 +78,10 @@ jobs:
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
           # Windows / macOS: ホストの vcpkg
           CIBW_ENVIRONMENT_WINDOWS: VCPKG_ROOT='${{ github.workspace }}\vcpkg'
-          CIBW_ENVIRONMENT_MACOS: VCPKG_ROOT='${{ github.workspace }}/vcpkg' MACOSX_DEPLOYMENT_TARGET=11.0
+          CIBW_ENVIRONMENT_MACOS: >-
+            VCPKG_ROOT='${{ github.workspace }}/vcpkg'
+            MACOSX_DEPLOYMENT_TARGET=11.0
+            SKBUILD_CMAKE_DEFINE='VCPKG_TARGET_TRIPLET=${{ matrix.triplet }};CMAKE_OSX_ARCHITECTURES=${{ matrix.cmake_arch }}'
           # Linux: コンテナ内に vcpkg を入れる。vcpkg.json の builtin-baseline のコミットだけを浅く取って
           # チェックアウトする（Windows / macOS の run-vcpkg と同じコミットになり、再現性が揃う）
           CIBW_BEFORE_ALL_LINUX: >
