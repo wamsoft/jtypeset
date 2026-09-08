@@ -80,10 +80,13 @@ int main() {
         std::fprintf(stderr, "fonts not found under ./data (run `make fontdata`)\n");
         return 1;
     }
+    // カラー絵文字（あれば）。COLR v1 のレイヤが塗り付きのパスになり、縦組みでは正立する
+    const bool hasEmoji = fonts.loadFile("data/Noto-COLRv1.ttf", "emoji") != nullptr;
 
     // --- 本文 ---
     TextStyle body;
     body.font.family = {"serif-ja", "serif"};
+    if (hasEmoji) body.font.family.push_back("emoji");
     body.size = 11.0f;
     body.fill = Color::rgb(20, 20, 20);
 
@@ -92,7 +95,7 @@ int main() {
         u"「何でも薄暗いじめじめした所でニャーニャー泣いていた事だけは記憶している」と、"
         u"Wagahai は 24 年に語った……。夏目漱石作の冒頭は、well-known な一文である！"
         u"　あとは、（括弧の）詰めと、中点・読点、の並びを見る。\n"
-        u"二つ目の段落。空行の後にも一字下げが付く。";
+        u"二つ目の段落。空行の後にも一字下げが付く。絵文字 \U0001F600\U0001F44D\U0001F3FD\U0001F1EF\U0001F1F5 もカラーで組める。";
 
     inl::Paragraph para;
     para.runs.push_back(inl::InlineRun{text, body});
