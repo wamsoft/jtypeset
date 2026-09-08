@@ -1,4 +1,5 @@
 # C++ ライブラリのビルドとテスト（Windows / Linux）
+# ドキュメント（docs/、*.md、mkdocs.yml）だけの変更では走らない。
 #
 # vcpkg は lukka/run-vcpkg でセットアップし、CMake の preset（CMakePresets.json）で構成する。
 # テスト用フォントは data/download_fonts.py で取る（無いテストは skip するが、あった方が検査が効く）。
@@ -8,8 +9,27 @@ name: ci
 on:
   push:
     branches: [main, master]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+      - "mkdocs.yml"
+      - "LICENSE"
+      - ".github/workflows/docs.yml"
+      - ".github/workflows/wheels.yml"
   pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+      - "mkdocs.yml"
+      - "LICENSE"
+      - ".github/workflows/docs.yml"
+      - ".github/workflows/wheels.yml"
   workflow_dispatch:
+
+# 同じブランチに続けて push したら古い実行は取り消す
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:

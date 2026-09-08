@@ -11,6 +11,14 @@ name: docs
 on:
   push:
     branches: [main, master]
+    # サイトに影響するファイルが変わったときだけ（手引き・ガイド、Doxygen の入力 = ヘッダ、pdoc の入力 = python/、サンプル）
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "include/**"
+      - "python/**"
+      - "samples/markdown/**"
+      - ".github/workflows/docs.yml"
   workflow_dispatch:
 
 permissions:
