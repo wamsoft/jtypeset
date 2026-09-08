@@ -34,5 +34,10 @@ Windows / CPython 3.12 の wheel を用意しています。ほかの環境は [
 
 ## 出力例
 
-[サンプル](samples.md) に、同じ Markdown を横組み A4 と縦組み A5 で組んだ PDF と 1 ページ目の画像があります。
-サンプルの C++ プログラム（台本・小説・技術文書・レポート）は `samples/` にあります。
+同じ Markdown（[report.md](https://github.com/wamsoft/jtypeset/blob/main/samples/markdown/report.md)）を組んだ PDF をそのまま見られます:
+
+- 横組み A4: [report.pdf](samples/report.pdf)
+- 縦組み A5: [report_vertical.pdf](samples/report_vertical.pdf)（同じファイルを `--vertical --paper A5` で）
+
+1 ページ目の画像と作り方は [サンプル（Markdown と PDF）](samples.md) に。C++ のサンプル（台本・小説・技術文書・レポート）は
+リポジトリの `samples/` にあります。
