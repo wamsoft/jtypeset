@@ -1,156 +1,139 @@
-# 想定
+# typeset / jtypeset — 縦書き・横書きの日本語組版
 
-台本、小説、絵入り技術文章、漫画用の吹き出し処理、などを想定した
-縦書き対応した、シンプルな日本語組版ライブラリを C++ で構築したい
+**typeset** は、縦書き・横書きの日本語組版を 1 つのエンジンで行い、同じ組版結果を **PDF / SVG / PNG** に出す
+C++17 ライブラリです。Python パッケージ **jtypeset** から使え、**Markdown を書いて日本語の PDF を作る**
+コマンド `jtypeset-md` が付いています。
 
-・もっぱらツール作成に利用
-・ゲームエンジンなどにも組み込めるようなもの
-　ベクターデータでの処理、SVG出力、PDF出力も視野にいれる
+- 日本語組版の基本（JLReq）に沿った約物の詰め・禁則・追い込み／追い出し・ぶら下げ・両端揃え
+- ルビ（グループ／モノ／熟語）・縦中横・圏点・割注・字取り
+- 見出しの採番と PDF のしおり、目次、索引、図表番号と相互参照、脚注、箇条書き、コードブロック、表（ページまたぎ・rowspan）、
+  画像の回り込み、段組と段抜き、柱・ノンブル
+- 数式やグラフなど外部レンダラの出力（SVG）を行内・別行立てに差し込む口（LaTeX 数式は MicroTeX のサンプルあり）
+- フォントはファイルから直接読み、PDF にはサブセットで埋め込む（埋め込み許可 fsType を確認）
 
-いままで作っているライブラリ資産で活用できるものは活用
+想定している用途は台本・小説・技術文書・レポートなどのツール作りです。詳しい説明は
+**[ドキュメントサイト](https://wamsoft.github.io/jtypeset/)** にあります（Markdown → PDF の手引き、C++ / Python のリファレンス）。
 
-d:/test/richtext/  richtext用のライブラリ。想定はパラグラフレベル。
-横書き組版には minikin 、縦書きは独自処理
+## Python 版（jtypeset）の入手と使い方
 
-d:/work/kirikiri/glyphware
-グリフ処理をキャッシュまで含めて総合的に扱えるようにまとめたライブラリ。
-中身は FreeType + Harfbuzz + icu の一部
+```bash
+pip install jtypeset                   # 本体
+pip install "jtypeset[md]"             # Markdown → PDF（markdown-it-py など）
+pip install "jtypeset[md,highlight]"   # + Pygments（コードブロックの色付け。無くても単色で組める）
+```
 
-必要になってくるもの
-・ルビ処理、日本語組版全般
-・罫線処理、ページ処理、画像差し込み、まわりこみなどなど
-必要そうな仕様を、既存のライブラリやドキュメントなどから設計を考える必要あり
+### Markdown から PDF を作る
 
-C++のライブラリ + python でのバインドができるとよい
+```bash
+jtypeset-md report.md                                   # → report.pdf
+jtypeset-md novel.md --vertical --paper A5 --font fonts/mincho.otf   # 縦組み・A5・フォント指定
+jtypeset-md report.md --toc --png 120                   # 先頭に目次、各ページの PNG も出す
+```
 
+Markdown の先頭に YAML front matter を書くと、判型・書字方向・フォント・目次・柱／ノンブル・数式ハンドラなどを指定できます。
+
+```markdown
+---
+title: 組版の手引き
+author: 組版基盤チーム
+paper: A5
+writing: vertical
+toc: true
 ---
 
-# typeset — 現状
+# はじめに {#sec-intro}
 
-縦書き・横書きの日本語組版（JLReq 水準）を同じエンジンで行い、同一の組版結果をラスタ・PDF・SVG へ出す
-C++17 ライブラリ。フォント層は [glyphware](https://github.com/wamsoft/glyphware)（FreeType + HarfBuzz）、
-richtext の縦組みエンジンを書字方向非依存に一般化して移植したものが組版コア。minikin / ICU は使わない。
+本文。ルビは｜組版《くみはん》のように書ける[^1]。第 {ref:sec-body} 章を参照。
 
-```
-Document / Flow（段落・見出し・ラベル付き段落・画像・表・罫線・セクション）
-  → page   : ページマスタ・段・流し込み・回り込み・柱・ノンブル・改ページ制御
-  → inl    : Itemizer → HarfBuzz → Box/Glue/Penalty（JLReq）→ 行分割（Greedy / Knuth–Plass）→ LineBox
-  → dl     : 表示リスト（GlyphRun / Path / Rect / Image / Group）
-  → backend: ラスタ（glyphware マスク合成）/ PDF（Identity-H、グリフ ID 直書き）/ SVG（defs + use）
-  obj      : 外部オブジェクト（数式・グラフ）の差し込み口。ハンドラ登録（関数／外部コマンド）と SVG 読み込み
+[^1]: 脚注は段の末尾に集まる。
 ```
 
-## ビルド
+見出し・箇条書き・表・画像・脚注・数式（`$…$`）・ルビ・`<!-- pagebreak -->`・`[toc]`・`[index]` に対応しています。
+一覧と例は [Markdown → PDF の手引き](https://wamsoft.github.io/jtypeset/markdown/) と
+[`samples/markdown/report.md`](samples/markdown/report.md) を参照してください。
+フォントを指定しなければ OS のフォント（Windows: 游明朝／游ゴシック、macOS: ヒラギノ、Linux: Noto CJK）を探します。
 
-```bash
-# VCPKG_ROOT を設定しておく。テスト用フォントは make fontdata（または richtext/data からコピー）
-make fontdata
-make prebuild GLYPHWARE_DIR=d:/work/kirikiri/glyphware   # 開発中はローカルツリー。省略すると GitHub から FetchContent
-make build
-make test
-
-# サンプル（リポジトリルートで実行。./data/ のフォントを読む）
-./build/x64-windows/Release/sample_inline.exe   # 縦横同一文（ルビ・縦中横・圏点・割注・字取り）
-./build/x64-windows/Release/sample_script.exe   # 台本（A5 縦組み、名前欄＋本文、柱・ノンブル）
-./build/x64-windows/Release/sample_novel.exe    # 小説（B6 縦組み 2 段、章見出し、ルビ）
-./build/x64-windows/Release/sample_tech.exe     # 技術文書（A4 横組み、回り込みの図、表、2 段組）
-./build/x64-windows/Release/sample_report.exe   # レポート（目次、見出し採番、図表番号と相互参照、箇条書き、コード、しおり）
-./build/x64-windows/Release/sample_objects.exe  # 外部オブジェクト（関数ハンドラの分数、外部コマンドのグラフ、SVG、式番号）
-
-# MicroTeX（LaTeX 数式）ハンドラ: 任意ターゲット。tinyxml2 は vcpkg の feature で入る
-make prebuild GLYPHWARE_DIR=d:/work/kirikiri/glyphware CMAKEOPT="-DTYPESET_HANDLER_MICROTEX=ON -DVCPKG_MANIFEST_FEATURES=microtex"
-make build
-./build/x64-windows/handlers/microtex/Release/sample_microtex.exe   # 行内・別行立ての数式、式番号、\text{} の和文
-```
-
-## できること（2026-09 時点）
-
-- 縦組み・横組みの JLReq 組版（約物の詰め・禁則・追い込み／追い出し・ぶら下げ・両端揃え、Greedy / Knuth–Plass）
-- ルビ（グループ／モノ／熟語）・縦中横・圏点・割注・字取り、行内画像
-- 段落・見出し（自動採番、PDF しおり）・箇条書き・コードブロック（背景・空白保持）・罫線・ラベル付き段落（台本の名前欄）
-- 画像（配置・回り込み・キャプション）、表（自動列幅、colspan / rowspan、セルの縦位置、ヘッダ繰り返し、段より高い行の分割）
-- ページマスタ（判型・内外余白・段組・柱・ノンブル）、改ページ制御（orphans / widows / keepWithNext / keepTogether）、
-  段の途中の段抜きと最終ページの段揃え、目次、索引（`{index:よみ|用語}`）、図表番号と相互参照（`{ref:label}` `{page:label}`）、
-  脚注（段末に集める）
-- 外部オブジェクトの差し込み: 本文に「ハンドラ名＋ソース」を書き、登録した関数／外部コマンドが返す SVG や描画命令を
-  行内（ベースライン揃え）・別行立て（式番号・`{ref:}` 参照）に置く。数式レンダラ（MathJax / dvisvgm / Typst）や
-  グラフ（matplotlib）を本体に依存を足さずにつなげる。LaTeX 数式は `handlers/microtex/`（MicroTeX、任意ターゲット）で
-  数式フォントのグリフとして PDF に埋め込まれる
-- 出力: ラスタ（PNG）、PDF（Identity-H・hb-subset・Flate・画像・しおり）、SVG。Python バインディング
-
-## Python（PyPI 名: `jtypeset`、`import jtypeset`）
-
-```bash
-# 開発ツリーから
-pip install pybind11
-make prebuild GLYPHWARE_DIR=d:/work/kirikiri/glyphware CMAKEOPT=-DTYPESET_BUILD_PYTHON=ON
-make build
-PYTHONPATH=build/x64-windows/python/Release python python/examples/script.py    # typeset/ パッケージ（_jtypeset 拡張 + 純 Python）
-PYTHONPATH=build/x64-windows/python/Release python python/examples/objects.py   # Python 関数／外部コマンドをオブジェクトのハンドラに
-
-# wheel（scikit-build-core。VCPKG_ROOT を設定しておけば toolchain は CMakeLists が補う。glyphware は FetchContent）
-pip wheel . -w dist --no-deps
-pip install dist/jtypeset-*.whl
-```
-
-### Markdown → PDF（`jtypeset.md`）
-
-```bash
-pip install "jtypeset[md]"            # markdown-it-py / mdit-py-plugins / PyYAML
-pip install "jtypeset[md,highlight]"  # + Pygments（コードブロックの色付け。無くても単色で組める）
-jtypeset-md report.md                 # report.pdf
-jtypeset-md report.md --vertical --paper A5 --font fonts/mincho.otf --toc
-python -m jtypeset.md report.md -o out.pdf --png 120 --math mathtext   # 数式は matplotlib の mathtext（任意）
-```
-
-先頭の YAML front matter で題名・著者・判型（A4/A5/B5/B6/文庫/新書/`148x210mm`）・書字方向・段数・余白・フォント・
-本文サイズ・行送り・目次・見出し採番・柱／ノンブル・数式ハンドラ（`mathtext` か `command: <cmd>`）を指定できる
-（`python/jtypeset/md/convert.py` の `Options`）。CLI の指定は front matter より優先。
-
-対応する記法: 見出し（採番・PDF しおり・`{#label}` → `{ref:label}` `{page:label}`）、段落（一字下げ・両端揃え）、
-箇条書き／番号付き（入れ子）、コードブロック（背景・空白保持・タブ展開。Pygments があれば言語名で色付け）、
-表（GFM。直後の「表: 〜」がキャプション）、
-画像（単独の段落なら図番号付きの図、文中なら行内画像）、脚注 `[^1]`、引用、水平線、強調・斜体・行内コード、
-リンク（URL は脚注へ）、数式 `$…$` `$$…$$ (label)`、ルビ（`｜漢字《かんじ》` `漢字《かんじ》` `{漢字|かんじ}`）、
-`<!-- pagebreak -->` `<!-- columnbreak -->` `<!-- columns: 2 -->` `[toc]` `[index]`（本文の `{index:よみ|用語}` を集める）。
-例: `samples/markdown/report.md`。
-
-フォントを指定しなければ `data/` の Noto、無ければ OS のフォント（Windows: 游明朝／游ゴシック、macOS: ヒラギノ、
-Linux: Noto CJK）を探す。TTC はサブセット化して埋め込む。OS/2 の fsType（Restricted License、ビットマップのみ、
-サブセット不可）を見て、埋め込めないフォントは警告を出して埋め込まない。
+### Python API
 
 ```python
 import jtypeset as ts
-fonts = ts.FontSet(); fonts.load_file("data/NotoSerifJP-Regular.otf", "serif-ja")
+
+fonts = ts.FontSet()
+fonts.load_file("NotoSerifJP-Regular.otf", "serif-ja")
+
 body = ts.TextStyle(["serif-ja"], 11.0)
-seq = ts.PageSequence(); seq.master.size = ts.paper.A5; seq.master.writing_mode = ts.WritingMode.VERTICAL_RL
+seq = ts.PageSequence()
+seq.master.size = ts.paper.A5
+seq.master.writing_mode = ts.WritingMode.VERTICAL_RL
+
 flow = ts.Flow()
-p = ts.Paragraph("吾輩は猫である。名前はまだ無い。", body); p.annotate(ts.Annotation.ruby(0, 2, "わがはい"))
+p = ts.Paragraph("吾輩は猫である。名前はまだ無い。", body)
+p.annotate(ts.Annotation.ruby(0, 2, "わがはい"))
 flow.add_paragraph(p)
+
 pages = ts.FlowLayouter(fonts).layout(flow, seq)
-ts.save_pdf(pages, "out.pdf"); pages[0].save_png("out.png", dpi=144)
+ts.save_pdf(pages, "neko.pdf")
+pages[0].save_png("neko_p1.png", dpi=144)
 ```
 
-## ドキュメント
+段落・見出し・表・画像・目次・索引・脚注・外部オブジェクトの使い方は
+[Python ガイド](https://wamsoft.github.io/jtypeset/python_guide/) と、`help(jtypeset)` / 型スタブ（IDE の補完）を参照してください。
 
-| ファイル | 内容 |
-|---|---|
-| `docs/cpp_guide.md` | C++ の使い方と主要な型（Doxygen のトップページ） |
-| `docs/python_guide.md` | Python の使い方、`jtypeset.md` の front matter 一覧 |
-| `検討.md` | 既存資産の棚卸し、設計判断、参照仕様、フェーズ計画、決定事項 |
-| `設計.md` | ディレクトリ・名前空間・型・処理の流れ（Phase 0〜2 の具体化） |
-| `実装.md` | フェーズ別の実装進捗・確認結果・積み残し |
+## ビルド（C++ ライブラリ・開発者向け）
 
-リファレンスの生成:
+依存は [vcpkg](https://github.com/microsoft/vcpkg) で入れます（FreeType / HarfBuzz / libunibreak / zlib / stb / doctest）。
+フォント層の [glyphware](https://github.com/wamsoft/glyphware) は CMake の FetchContent で取得します（開発中は `GLYPHWARE_DIR` でローカルツリーを指せます）。
 
 ```bash
-make docs                       # C++: Doxygen（docs/Doxyfile）→ build/docs/cpp/html/index.html。DOXYGEN=path で実行ファイル指定
-make pydocs                     # Python: 型スタブ python/jtypeset/_jtypeset/ と pdoc の HTML → build/docs/python/index.html
-                                #   （pip install pdoc pybind11-stubgen。ビルド済みの python パッケージを読む）
-cmake --build build/x64-windows --target docs   # Doxygen が PATH にあれば同じ
+export VCPKG_ROOT=/path/to/vcpkg
+make fontdata                                   # テスト・サンプル用の Noto フォントを data/ にダウンロード
+make prebuild                                   # cmake --preset（Windows: x64-windows。Linux / macOS の preset もある）
+make build                                      # cmake --build
+make test                                       # ctest（doctest）
+
+./build/x64-windows/Release/sample_report.exe   # サンプルはリポジトリルートで実行（./data/ を読む）
 ```
+
+- Python バインディングも一緒にビルド: `make prebuild CMAKEOPT=-DTYPESET_BUILD_PYTHON=ON`（`pip install pybind11` が必要）。
+  ビルドツリーの `build/<preset>/python/Release` を `PYTHONPATH` に足すと `import jtypeset` できます
+- wheel: `pip wheel . -w dist --no-deps`（scikit-build-core。`VCPKG_ROOT` があれば toolchain は自動で補います）
+- MicroTeX（LaTeX 数式）ハンドラ: `make prebuild CMAKEOPT="-DTYPESET_HANDLER_MICROTEX=ON -DVCPKG_MANIFEST_FEATURES=microtex"`
+- リファレンス: `make docs`（Doxygen）、`make pydocs`（型スタブ＋ pdoc）、`make site`（MkDocs でドキュメントサイトを `build/site` に）
+
+サンプル: `sample_inline`（縦横同一文）、`sample_script`（台本）、`sample_novel`（小説 2 段）、`sample_tech`（技術文書）、
+`sample_report`（レポート: 目次・採番・図表番号・脚注・索引）、`sample_objects`（外部オブジェクト）。
+出力 `output_*.png/.pdf/.svg` はリポジトリルートに出ます。詳細は [ビルド](https://wamsoft.github.io/jtypeset/build/)。
+
+## 技術解説
+
+```
+Flow（段落・見出し・表・画像・目次・索引…）
+  → page    : ページマスタ・段・流し込み・回り込み・柱・ノンブル・改ページ制御・多パス（採番・参照・目次・索引）
+  → inl     : Itemizer → HarfBuzz → Box / Glue / Penalty（JLReq）→ 行分割（Greedy / Knuth–Plass）→ 行
+  → dl      : 表示リスト（GlyphRun / Path / Rect / Image / Group）
+  → backend : ラスタ（PNG）/ PDF（Identity-H、サブセット、Flate、しおり）/ SVG（defs + use）
+  obj       : 外部オブジェクト（数式・グラフ）の差し込み口。関数／外部コマンド、SVG 読み込み
+```
+
+- **1 つのエンジンで縦横**: 行内を論理座標（送り方向と、行の中心線からのずれ）で組み、最後に 1 箇所で物理座標に写す。
+  縦組みの正立／横倒し（UAX #50）、ルビや圏点の付く側（縦: 右、横: 上）もここで決まる
+- **Box / Glue / Penalty**: 和文を「1 文字 1 マス」ではなく TeX と同じ箱・のり・ペナルティの列として解く。
+  JLReq の文字クラスとアキ量表から Glue を作り、禁則は Penalty、ぶら下げは幅が負の Penalty、
+  追い出しは和字間の伸びで表す。Greedy と Knuth–Plass を選べ、行長は行ごとに変えられる（回り込み・吹き出し）
+- **表示リストで分離**: 組版結果は描画命令の列になり、3 つの出力先が同じものを描く。
+  グリフ変形（回転・平体長体・斜体）の組み立ても 1 箇所。Inkscape / poppler で描き直して一致を確認している
+- **ページ組版**: 段落を段に入る行数だけ組んで残りを次の段へ続ける。orphans / widows、keepWithNext（見出しの巻き取り）、
+  段抜きと段の高さ揃えは「ページの再開点から段を縮めて組み直す」試行で解く。見出し番号・図表番号・相互参照・目次・
+  索引・総ページ数は 2〜3 パスで安定させる
+- **フォント**: glyphware（FreeType + HarfBuzz）。フォントファイルのバイト列から HarfBuzz のフォントを自前に作り、
+  フォントユニットで位置を受け取る。PDF は hb-subset でサブセット化し、OS/2 の fsType（埋め込み許可）を確認する。
+  minikin と ICU は使わない（UAX #14 は libunibreak、双方向は SheenBidi）
+
+続きは [技術解説](https://wamsoft.github.io/jtypeset/architecture/) と [C++ ガイド](docs/cpp_guide.md)。
+経緯・判断は `検討.md` / `設計.md` / `実装.md` に記録しています。
 
 ## ライセンス
 
-typeset 本体は MIT（予定）。依存: FreeType（FTL）、HarfBuzz（MIT）、SheenBidi（Apache-2.0、glyphware 経由）、
-libunibreak（zlib）、zlib、stb（MIT / PD）、doctest（MIT、テストのみ）。
+MIT License（`LICENSE`）。依存: FreeType（FTL）、HarfBuzz（MIT）、SheenBidi（Apache-2.0、glyphware 経由）、
+libunibreak（zlib）、zlib、stb（MIT / PD）、doctest（MIT、テストのみ）。Python の任意依存: markdown-it-py（MIT）、
+mdit-py-plugins（MIT）、PyYAML（MIT）、Pygments（BSD）。MicroTeX ハンドラは MIT（付属フォントは OFL / Knuth ライセンス）。

@@ -40,7 +40,7 @@ endif
 
 BUILD_PATH=$(shell cmake --preset $(PRESET) -N | grep BUILD_DIR | sed 's/.*BUILD_DIR="\(.*\)"/\1/')
 
-.PHONY: prebuild build clean test fontdata docs pydocs
+.PHONY: prebuild build clean test fontdata docs pydocs site
 
 all: build
 
@@ -74,3 +74,10 @@ pydocs:
 	cp -r python/jtypeset/_jtypeset $(PYPKG)/typeset/
 	mkdir -p build/docs
 	PYTHONPATH=$(PYPKG) pdoc typeset -o build/docs/python --no-show-source
+
+# ドキュメントサイト（MkDocs + Doxygen + pdoc）→ build/site。docs と pydocs を先に実行しておく
+site:
+	mkdocs build
+	mkdir -p build/site/cpp build/site/python
+	cp -r build/docs/cpp/html build/site/cpp/
+	cp -r build/docs/python/. build/site/python/

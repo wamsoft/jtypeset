@@ -7,6 +7,8 @@ name = "jtypeset"
 version = "0.1.0"
 description = "jtypeset: Japanese typesetting (vertical/horizontal, JLReq) with raster / PDF / SVG output and Markdown → PDF — C++17 core (typeset) with pybind11 bindings"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.9"
 authors = [{ name = "wamsoft" }]
 keywords = ["typesetting", "japanese", "vertical", "pdf", "svg", "ruby", "markdown", "jlreq"]
@@ -16,7 +18,16 @@ classifiers = [
     "Programming Language :: C++",
     "Programming Language :: Python :: 3",
     "Topic :: Text Processing :: Fonts",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
 ]
+
+[project.urls]
+Homepage = "https://wamsoft.github.io/jtypeset/"
+Documentation = "https://wamsoft.github.io/jtypeset/"
+Repository = "https://github.com/wamsoft/jtypeset"
+Issues = "https://github.com/wamsoft/jtypeset/issues"
 
 [project.optional-dependencies]
 md = ["markdown-it-py>=3.0", "mdit-py-plugins>=0.4", "PyYAML>=6.0"]

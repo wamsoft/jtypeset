@@ -1,0 +1,42 @@
+site_name: typeset / jtypeset
+site_description: 縦書き・横書きの日本語組版ライブラリと Markdown → PDF
+site_url: https://wamsoft.github.io/jtypeset/
+repo_url: https://github.com/wamsoft/jtypeset
+repo_name: wamsoft/jtypeset
+docs_dir: docs
+site_dir: build/site
+use_directory_urls: true
+
+theme:
+  name: readthedocs
+  language: ja
+  highlightjs: true
+  navigation_depth: 3
+
+markdown_extensions:
+  - toc:
+      permalink: true
+  - tables
+  - fenced_code
+  - admonition
+
+exclude_docs: |
+  Doxyfile
+
+# Doxygen / pdoc の HTML はビルド後に site/ へコピーするので、無くても警告にしない
+validation:
+  nav:
+    not_found: ignore
+  links:
+    not_found: ignore
+
+nav:
+  - はじめに: index.md
+  - Markdown → PDF の手引き: markdown.md
+  - Python ガイド: python_guide.md
+  - C++ ガイド: cpp_guide.md
+  - 技術解説: architecture.md
+  - ビルド: build.md
+  - リファレンス:
+      - Python リファレンス（pdoc）: python/index.html
+      - C++ リファレンス（Doxygen）: cpp/html/index.html

@@ -1,0 +1,84 @@
+# ドキュメントサイトを GitHub Pages に配信する
+#
+#   build/site = MkDocs（docs/*.md） + Doxygen（C++ リファレンス → cpp/） + pdoc（Python リファレンス → python/）
+#
+# Python リファレンスには拡張モジュールのビルドが要るので、vcpkg で依存を入れて pip install する。
+# それが失敗してもサイト自体（手引き・C++ リファレンス）は配信する（continue-on-error）。
+# リポジトリの Settings → Pages → Source を "GitHub Actions" にしておく。
+
+name: docs
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y doxygen ninja-build
+          python -m pip install --upgrade pip
+          python -m pip install mkdocs pdoc pybind11-stubgen pybind11 markdown-it-py mdit-py-plugins PyYAML Pygments
+
+      - name: C++ reference (Doxygen)
+        run: |
+          mkdir -p build/docs
+          doxygen docs/Doxyfile
+
+      - name: vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: ${{ github.workspace }}/vcpkg
+          vcpkgJsonGlob: vcpkg.json
+          runVcpkgInstall: false
+
+      - name: Build Python package
+        id: pybuild
+        continue-on-error: true
+        run: |
+          python -m pip install . --no-deps -v
+
+      - name: Python reference (pdoc)
+        if: steps.pybuild.outcome == 'success'
+        continue-on-error: true
+        run: |
+          mkdir -p build/docs
+          pdoc jtypeset -o build/docs/python --no-show-source
+
+      - name: Site (MkDocs)
+        run: |
+          mkdocs build
+          mkdir -p build/site/cpp build/site/python
+          cp -r build/docs/cpp/html build/site/cpp/
+          if [ -d build/docs/python ]; then cp -r build/docs/python/. build/site/python/; else echo "<p>Python リファレンスはこのビルドでは生成されませんでした。</p>" > build/site/python/index.html; fi
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
