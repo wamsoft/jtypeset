@@ -41,7 +41,7 @@ struct LineInfo {
 
 } // namespace
 
-PYBIND11_MODULE(typeset, m) {
+PYBIND11_MODULE(_typeset, m) {
     m.doc() = "typeset — 縦書き・横書きの日本語組版ライブラリ";
 
     m.attr("MM") = kMm;

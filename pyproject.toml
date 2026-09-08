@@ -18,18 +18,28 @@ classifiers = [
     "Topic :: Text Processing :: Fonts",
 ]
 
+[project.optional-dependencies]
+md = ["markdown-it-py>=3.0", "mdit-py-plugins>=0.4", "PyYAML>=6.0"]
+
+[project.scripts]
+typeset-md = "typeset.md.cli:main"
+
 [tool.scikit-build]
-# vcpkg の依存（freetype / harfbuzz / libunibreak / zlib / stb）が要るので VCPKG_ROOT を設定して
-# CMAKE_TOOLCHAIN_FILE を渡す。glyphware は GLYPHWARE_DIR が無ければ FetchContent で取る
+# vcpkg の依存（freetype / harfbuzz / libunibreak / zlib / stb）が要る。VCPKG_ROOT を設定しておけば
+# CMakeLists が toolchain を補う。glyphware は GLYPHWARE_DIR が無ければ FetchContent で取る
 cmake.version = ">=3.24"
 cmake.args = [
     "-DTYPESET_BUILD_PYTHON=ON",
     "-DTYPESET_BUILD_SAMPLES=OFF",
     "-DTYPESET_BUILD_TESTS=OFF",
-    "-DCMAKE_TOOLCHAIN_FILE=$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
 ]
-wheel.packages = []
+wheel.packages = ["python/typeset"]
 build-dir = "build/skbuild/{wheel_tag}"
 
 [tool.scikit-build.sdist]
 exclude = ["build/", "out/", "data/*.ttf", "data/*.otf", "output*"]
+
+# Windows では静的ライブラリ＋動的 CRT の triplet（Python 本体と同じ /MD。DLL を wheel に同梱しなくてよい）
+[[tool.scikit-build.overrides]]
+if.platform-system = "win32"
+cmake.define.VCPKG_TARGET_TRIPLET = "x64-windows-static-md"

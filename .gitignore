@@ -12,3 +12,4 @@ output*.svg
 data/*.ttf
 data/*.otf
 build_configure.log
+dist/

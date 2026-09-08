@@ -316,13 +316,24 @@ PdfWriter::Impl::FontResource* PdfWriter::Impl::acquireFont(
     if (base.empty()) base = desc.key;
     res->baseFont = sanitizeName(base);
 
-    if (res->data && res->dataSize > 0 && parseSfnt(res->data, res->dataSize, res->sfnt)) {
+    if (res->data && res->dataSize > 0 && parseSfnt(res->data, res->dataSize, res->sfnt, face->faceIndex())) {
         res->embeddable = true;
+        // 埋め込み許可（OS/2 fsType）。Restricted License とビットマップのみは埋め込まない
+        if (res->sfnt.embeddingRestricted()) {
+            res->embeddable = false;
+            warnings.push_back("font not embedded: " + res->baseFont +
+                               " (fsType: Restricted License embedding)");
+        } else if (res->sfnt.bitmapOnly()) {
+            res->embeddable = false;
+            warnings.push_back("font not embedded: " + res->baseFont +
+                               " (fsType: bitmap embedding only)");
+        } else if (res->sfnt.noSubsetting()) {
+            warnings.push_back("font embedded without subsetting: " + res->baseFont +
+                               " (fsType: no subsetting)");
+        }
     } else {
         res->embeddable = false;
-        warnings.push_back("font not embeddable: " + res->baseFont +
-                           (res->sfnt.isCollection ? " (TTC is not supported)"
-                                                   : " (no usable sfnt data)"));
+        warnings.push_back("font not embeddable: " + res->baseFont + " (no usable sfnt data)");
     }
 
     FontResource* raw = res.get();
@@ -731,7 +742,7 @@ std::string PdfWriter::build() {
 
         std::string fontData;
         std::string baseFont = font.baseFont;
-        if (impl_->subsetFonts) {
+        if (impl_->subsetFonts && !font.sfnt.noSubsetting()) {
             fontData = subsetFont(font.data, font.dataSize, font.face->faceIndex(), font.usedGlyphs);
             if (fontData.empty()) {
                 impl_->warnings.push_back("subsetting failed, embedding the full font: " + font.baseFont);
@@ -740,6 +751,11 @@ std::string PdfWriter::build() {
             }
         }
         if (fontData.empty()) {
+            if (font.sfnt.isCollection) {
+                // TTC は丸ごと埋め込めない（サブセット化で単体にする前提）
+                impl_->warnings.push_back("font not embedded: " + font.baseFont + " (TTC needs subsetting)");
+                continue;
+            }
             fontData.assign(reinterpret_cast<const char*>(font.data), font.dataSize);
         }
         const size_t fontLength = fontData.size();

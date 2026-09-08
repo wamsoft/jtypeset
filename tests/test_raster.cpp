@@ -66,3 +66,77 @@ TEST_CASE("RasterRenderer fills a rect with the expected color") {
     CHECK(bmp.row(0)[0] == 0xFFFFFFFFu);
     CHECK(bmp.row(6)[6] == 0xFFFFFFFFu);
 }
+
+#include <fstream>
+#include <iterator>
+#include <vector>
+
+#include "backend/sfnt_info.hpp"
+
+TEST_CASE("sfnt_info: fsType embedding permissions and TTC face directories") {
+    using typeset::backend::SfntInfo;
+    SfntInfo s;
+    CHECK_FALSE(s.embeddingRestricted());
+    CHECK_FALSE(s.noSubsetting());
+    CHECK_FALSE(s.bitmapOnly());
+    s.fsType = 0x0002;   // Restricted License
+    CHECK(s.embeddingRestricted());
+    s.fsType = 0x0008;   // Editable（游明朝など）
+    CHECK_FALSE(s.embeddingRestricted());
+    s.fsType = 0x0004 | 0x0002;   // Preview & Print が立っていれば Restricted ではない
+    CHECK_FALSE(s.embeddingRestricted());
+    s.fsType = 0x0100;
+    CHECK(s.noSubsetting());
+    s.fsType = 0x0200;
+    CHECK(s.bitmapOnly());
+
+    // 実フォント: Noto Serif JP は Installable（fsType 0）で CFF
+    std::ifstream f("data/NotoSerifJP-Regular.otf", std::ios::binary);
+    if (!f) { MESSAGE("font not found; skipping"); return; }
+    std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    SfntInfo info;
+    REQUIRE(typeset::backend::parseSfnt(bytes.data(), bytes.size(), info));
+    CHECK(info.isCFF);
+    CHECK_FALSE(info.isCollection);
+    CHECK(info.fsType == 0);
+    CHECK(info.unitsPerEm == 1000);
+
+    // 疑似 TTC: 同じフォントを 2 面持つコレクションを作り、face 1 のディレクトリが読めること
+    std::vector<uint8_t> ttc;
+    auto put32 = [&](uint32_t v) { for (int i = 3; i >= 0; --i) ttc.push_back(static_cast<uint8_t>((v >> (i * 8)) & 0xFF)); };
+    ttc.insert(ttc.end(), {'t', 't', 'c', 'f'});
+    put32(0x00010000);
+    put32(2);
+    const uint32_t headerEnd = 12 + 8;
+    put32(headerEnd);                       // face 0 のディレクトリ位置
+    put32(headerEnd + 12 + 16 * 0);         // 仮（下で直す）
+    // 元フォントのディレクトリを 2 つ並べ、表本体は元のオフセット + shift になるよう並べる
+    const size_t shift = headerEnd;          // 表のオフセットは shift だけずれる
+    const uint16_t numTables = static_cast<uint16_t>((bytes[4] << 8) | bytes[5]);
+    const size_t dirSize = 12 + 16 * static_cast<size_t>(numTables);
+    // face 0 dir
+    std::vector<uint8_t> dir(bytes.begin(), bytes.begin() + static_cast<ptrdiff_t>(dirSize));
+    for (uint16_t i = 0; i < numTables; ++i) {
+        uint8_t* rec = dir.data() + 12 + 16 * i;
+        uint32_t off = (rec[8] << 24) | (rec[9] << 16) | (rec[10] << 8) | rec[11];
+        off += static_cast<uint32_t>(shift + dirSize);   // 2 つ目のディレクトリのぶんもずらす
+        rec[8] = static_cast<uint8_t>(off >> 24); rec[9] = static_cast<uint8_t>(off >> 16);
+        rec[10] = static_cast<uint8_t>(off >> 8); rec[11] = static_cast<uint8_t>(off);
+    }
+    ttc.insert(ttc.end(), dir.begin(), dir.end());
+    // face 1 のディレクトリ位置を書き直す
+    const uint32_t dir1 = static_cast<uint32_t>(ttc.size());
+    ttc[16] = static_cast<uint8_t>(dir1 >> 24); ttc[17] = static_cast<uint8_t>(dir1 >> 16);
+    ttc[18] = static_cast<uint8_t>(dir1 >> 8); ttc[19] = static_cast<uint8_t>(dir1);
+    ttc.insert(ttc.end(), dir.begin(), dir.end());
+    ttc.insert(ttc.end(), bytes.begin() + static_cast<ptrdiff_t>(dirSize), bytes.end());
+    SfntInfo t0, t1, bad;
+    REQUIRE(typeset::backend::parseSfnt(ttc.data(), ttc.size(), t0, 0));
+    REQUIRE(typeset::backend::parseSfnt(ttc.data(), ttc.size(), t1, 1));
+    CHECK(t0.isCollection);
+    CHECK(t1.isCollection);
+    CHECK(t1.isCFF);
+    CHECK(t1.unitsPerEm == 1000);
+    CHECK(t1.dirOffset == dir1);
+    CHECK_FALSE(typeset::backend::parseSfnt(ttc.data(), ttc.size(), bad, 2));
+}

@@ -8,7 +8,7 @@
 
 set(GLYPHWARE_DIR "" CACHE PATH "Path to a local glyphware source tree (empty = FetchContent)")
 set(GLYPHWARE_GIT_REPOSITORY "https://github.com/wamsoft/glyphware.git" CACHE STRING "")
-set(GLYPHWARE_GIT_TAG "main" CACHE STRING "")
+set(GLYPHWARE_GIT_TAG "master" CACHE STRING "")
 
 if(TARGET glyphware)
     message(STATUS "typeset: using existing glyphware target")

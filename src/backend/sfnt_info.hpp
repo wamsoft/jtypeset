@@ -17,7 +17,8 @@ namespace typeset::backend {
 struct SfntInfo {
     bool valid = false;
     bool isCFF = false;         ///< true なら CFF（OpenType/CFF）、false なら glyf
-    bool isCollection = false;  ///< TTC。PDF へはそのまま埋め込めない
+    bool isCollection = false;  ///< TTC。サブセット化して単体フォントにしてから埋め込む（丸ごとは埋め込めない）
+    uint32_t dirOffset = 0;     ///< 表ディレクトリの位置（TTC では face ごとに異なる）
 
     uint16_t unitsPerEm = 1000;
     int16_t xMin = 0, yMin = 0, xMax = 0, yMax = 0;   ///< head の FontBBox
@@ -26,9 +27,16 @@ struct SfntInfo {
     float italicAngle = 0.0f;                         ///< post
     bool isFixedPitch = false;
     bool isSerif = false;                             ///< OS/2 の PANOSE から推定
+    uint16_t fsType = 0;                              ///< OS/2 の埋め込み許可ビット（無ければ 0 = Installable）
+
+    /// 埋め込み許可の判定（OpenType 仕様 OS/2 fsType）
+    bool embeddingRestricted() const { return (fsType & 0x000F) == 0x0002; }   ///< Restricted License: 埋め込み不可
+    bool noSubsetting() const { return (fsType & 0x0100) != 0; }                ///< サブセット化不可（丸ごと埋め込む）
+    bool bitmapOnly() const { return (fsType & 0x0200) != 0; }                  ///< アウトラインの埋め込み不可
 };
 
-bool parseSfnt(const uint8_t* data, size_t size, SfntInfo& out);
+/// @param faceIndex TTC のときに読む face 番号
+bool parseSfnt(const uint8_t* data, size_t size, SfntInfo& out, int faceIndex = 0);
 
 } // namespace typeset::backend
 
