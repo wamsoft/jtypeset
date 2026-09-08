@@ -160,6 +160,9 @@ public:
                              int firstLineIndex = 0);
 
 private:
+    ParagraphFragment layoutOnce(const Paragraph& para, WritingMode wm,
+                                 const LineShapeProvider& shape,
+                                 size_t charStart, int maxLines, int firstLineIndex);
     font::FontSet& fonts_;
 };
 

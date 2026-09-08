@@ -108,7 +108,8 @@ class RegionLineShape : public inl::LineShapeProvider {
 public:
     RegionLineShape(const Region& region, Pt startBlock, Pt pitch, Pt baseIndent = 0.0f)
         : region_(region), startBlock_(startBlock), pitch_(pitch), baseIndent_(baseIndent) {}
-    inl::LineShape at(int lineIndex) const override;
+    inl::LineShape at(int lineIndex) const override { return at(lineIndex, 0.0f); }
+    inl::LineShape at(int lineIndex, Pt extraBlock) const override;
 private:
     const Region& region_;
     Pt startBlock_;

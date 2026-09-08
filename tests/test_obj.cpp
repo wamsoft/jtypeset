@@ -6,11 +6,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <variant>
 
 #include "typeset/backend/raster.hpp"
 #include "typeset/block/block.hpp"
 #include "typeset/font/font_set.hpp"
+#include "typeset/image/image.hpp"
 #include "typeset/inl/paragraph.hpp"
 #include "typeset/inl/shaper.hpp"
 #include "typeset/obj/object.hpp"
@@ -44,6 +46,11 @@ Rect pathBounds(const std::vector<dl::Item>& items, const Matrix& ctm = Matrix{}
     }
     if (!any) return Rect{};
     return Rect{x0, y0, x1 - x0, y1 - y0};
+}
+
+std::shared_ptr<dl::Image> solidImage(int w, int h) {
+    std::vector<uint8_t> px(static_cast<size_t>(w) * h * 4, 200);
+    return image::fromRgba(w, h, px.data());
 }
 
 int countPaths(const std::vector<dl::Item>& items) {
@@ -395,4 +402,71 @@ TEST_CASE("objects in flow: a tall inline object widens the line pitch instead o
     // 1 行目の上にも広がる: 版面上端から 1 行目のベースラインまでが 30 以上
     const Rect bodyRect = seq.master.bodyRect(1);
     CHECK(baselines[0] - bodyRect.y >= 30.0f - 0.5f);
+}
+
+TEST_CASE("objects in flow: widened lines see the exclusion at their real position") {
+    font::FontSet fonts;
+    auto jp = fonts.loadFile("data/NotoSerifJP-Regular.otf", "serif-ja");
+    if (!jp) { MESSAGE("fonts not found; skipping"); return; }
+    TextStyle body;
+    body.font.family = {"serif-ja"};
+    body.size = 10.0f;
+
+    obj::ObjectRegistry reg;
+    reg.add("tall", [](const obj::ObjectRequest&) {
+        Path p;
+        p.addRect(Rect{0, 0, 20, 60});
+        dl::PathItem item;
+        item.path = p;
+        item.fill = Color::rgb(0, 0, 0);
+        return obj::makeResult(Size{20, 60}, 50.0f, {item});
+    });
+    page::PageSequence seq;
+    seq.master.size = Size{300, 400};
+    seq.master.margin = page::Margins{20, 20, 20, 20};
+    seq.master.writingMode = WritingMode::HorizontalTb;
+
+    // 右半分を塞ぐ回り込みの図（高さ 40pt）。1 行目に 60pt のオブジェクト → 2 行目は図より下に来るので全幅
+    block::Flow flow;
+    block::ImageBlock img;
+    img.image = solidImage(10, 10);
+    img.size = Size{120, 40};
+    img.placement = block::ImagePlacement::FloatEnd;
+    img.gap = 0.0f;
+    flow.addImage(img);
+
+    inl::Paragraph p;
+    p.runs.push_back(inl::InlineRun{u"一行目", body});
+    p.addObject("tall", u"x", {}, body);
+    std::u16string rest;
+    for (int i = 0; i < 12; ++i) rest += u"後ろの文章が続く。";
+    p.runs.push_back(inl::InlineRun{rest, body});
+    flow.addParagraph(p);
+
+    page::FlowLayoutOptions opts;
+    opts.objects = &reg;
+    page::FlowLayouter layouter(fonts);
+    const auto pages = layouter.layout(flow, seq, opts);
+    REQUIRE(pages.size() == 1);
+
+    // 行ごとの右端を集める
+    std::map<int, float> rightByLine;   // ベースライン y（丸め）→ 最大 x
+    for (const dl::Item& item : pages[0].dl.items) {
+        if (const auto* run = std::get_if<dl::GlyphRun>(&item)) {
+            for (const dl::Glyph& g : run->glyphs) {
+                const int key = static_cast<int>(std::lround(g.pos.y));
+                rightByLine[key] = std::max(rightByLine.count(key) ? rightByLine[key] : 0.0f, g.pos.x);
+            }
+        }
+    }
+    REQUIRE(rightByLine.size() >= 3);
+    auto it = rightByLine.begin();
+    const float line0Right = it->second;
+    ++it;
+    const float line1Right = it->second;
+    const Rect bodyRect = seq.master.bodyRect(1);
+    // 1 行目は図（右端 120pt）を避ける
+    CHECK(line0Right < bodyRect.right() - 120.0f + 0.5f);
+    // 2 行目は（行送りが広がって図の下に来るので）右半分まで届く
+    CHECK(line1Right > bodyRect.x + bodyRect.w * 0.6f);
 }

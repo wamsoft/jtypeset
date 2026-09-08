@@ -94,6 +94,32 @@ ParagraphFragment ParagraphLayouter::layout(const Paragraph& para, WritingMode w
                                             const LineShapeProvider& shape,
                                             size_t charStart, int maxLines,
                                             int firstLineIndex) {
+    // 行内オブジェクトで行送りが広がると、後ろの行の実際の位置が「行番号 × 行送り」からずれる。
+    // 排除領域（回り込み）を見る LineShapeProvider にそのずれを渡して組み直す（不動点まで、最大 3 回）
+    std::vector<Pt> offsets;
+    ParagraphFragment frag;
+    for (int iter = 0; iter < 3; ++iter) {
+        const OffsetLineShape shifted(shape, offsets, firstLineIndex);
+        frag = layoutOnce(para, wm, shifted, charStart, maxLines, firstLineIndex);
+        std::vector<Pt> next(frag.lines.size(), 0.0f);
+        Pt acc = 0.0f;
+        bool any = false;
+        for (size_t i = 0; i < frag.lines.size(); ++i) {
+            next[i] = acc + frag.lines[i].extraBefore;
+            acc += frag.lines[i].extraBefore + frag.lines[i].extraAfter;
+            if (next[i] != 0.0f) any = true;
+        }
+        if (!any && offsets.empty()) break;
+        if (next == offsets) break;
+        offsets = std::move(next);
+    }
+    return frag;
+}
+
+ParagraphFragment ParagraphLayouter::layoutOnce(const Paragraph& para, WritingMode wm,
+                                                const LineShapeProvider& shape,
+                                                size_t charStart, int maxLines,
+                                                int firstLineIndex) {
     ParagraphFragment frag;
     std::vector<std::shared_ptr<const dl::Image>> images;
     std::vector<Size> imageSizes;

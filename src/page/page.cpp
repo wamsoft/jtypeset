@@ -110,8 +110,8 @@ void Region::freeInlineRange(Pt block0, Pt block1, Pt& start, Pt& end) const {
     end = bestEnd;
 }
 
-inl::LineShape RegionLineShape::at(int lineIndex) const {
-    const Pt b0 = startBlock_ + pitch_ * static_cast<float>(lineIndex);
+inl::LineShape RegionLineShape::at(int lineIndex, Pt extraBlock) const {
+    const Pt b0 = startBlock_ + pitch_ * static_cast<float>(lineIndex) + extraBlock;
     Pt s = 0.0f, e = 0.0f;
     region_.freeInlineRange(b0, b0 + pitch_, s, e);
     inl::LineShape shape;
