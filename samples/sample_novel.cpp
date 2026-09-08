@@ -120,7 +120,9 @@ int main() {
         p = findU(t, u"獰悪");
         a.push_back(inl::Annotation::ruby(p, p + 2, u"どうあく"));
         p = findU(t, u"書生");
-        a.push_back(inl::Annotation::ruby(p, p + 2, u"しょせい"));
+        a.push_back(inl::Annotation::ruby(p, p + 2, u"しょ|せい", inl::RubyMode::Jukugo));
+        p = findU(t, u"人間中");
+        a.push_back(inl::Annotation::ruby(p, p + 3, u"にん|げん|じゅう", inl::RubyMode::Jukugo));
         addBody(t, a);
     }
     addBody(u"この書生というのは時々我々を捕えて煮て食うという話である。しかしその当時は何という考もなかったから別段恐しいとも思わなかった。"

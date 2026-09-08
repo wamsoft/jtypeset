@@ -40,7 +40,9 @@ inl/       shaper             Itemizer（スタイル・face・向き）＋ Harf
            paragraph          Paragraph → ParagraphFragment（LineBox 列）。charStart からの再開と maxLines
 block/     Block              段落・見出し・罫線・ラベル付き段落・画像・表・セクション、BlockStyle（orphans/widows/keepWithNext/改ページ）
 page/      PageMaster/Region  判型・余白・段。Region は排除領域（回り込み）を持ち RegionLineShape が行の形を返す
-           FlowLayouter       Flow をページ列へ流し込む。柱・ノンブル（{page} {pages} {title}）
+           FlowLayouter       Flow をページ列へ流し込む。柱・ノンブル（{page} {pages} {title}）。
+                              段組ページの途中の段抜きは、ページの再開点から段を縮めて組み直す試行モードで段の高さを揃える。
+                              表は owner グリッド（colspan / rowspan）で罫線を決める
 dl/        DisplayList        GlyphRun / Path / Rect / Image / Group。レイアウトと backend の分割線
            glyph_transform    グリフ固有の変形（回転・平体長体・斜体）。3 backend で共有
 backend/   raster             glyphware のカバレッジマスク＋自前合成。パスは自前スキャンライン AA。PNG 出力

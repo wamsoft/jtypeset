@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include <cmath>
 #include <memory>
 
 #include "typeset/block/block.hpp"
@@ -214,4 +215,126 @@ TEST_CASE("FlowLayouter: rule block emits a thin rect after the paragraph") {
         }
     }
     CHECK(rules == 1);
+}
+
+TEST_CASE("FlowLayouter: table rowspan spans rows and keeps them together") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+
+    page::PageSequence seq;
+    seq.master.size = Size{300, 300};
+    seq.master.margin = page::Margins{20, 20, 20, 20};
+    seq.master.writingMode = WritingMode::HorizontalTb;
+
+    auto cell = [&](const char16_t* s, int rowspan) {
+        block::TableCell c;
+        inl::Paragraph p = inl::Paragraph::plain(s, fx.style(9.0f));
+        p.style.lineHeight = 1.4f;
+        c.paras.push_back(p);
+        c.rowspan = rowspan;
+        return c;
+    };
+    block::TableBlock t;
+    t.columns = {block::TableColumn{60.0f}, block::TableColumn{0.0f}};
+    block::TableRow r1; r1.cells = {cell(u"甲", 2), cell(u"一", 1)};
+    block::TableRow r2; r2.cells = {cell(u"二", 1)};
+    block::TableRow r3; r3.cells = {cell(u"乙", 1), cell(u"三", 1)};
+    t.rows = {r1, r2, r3};
+    block::Flow flow;
+    flow.addTable(t);
+
+    page::FlowLayouter layouter(fx.fonts);
+    const auto pages = layouter.layout(flow, seq);
+    REQUIRE(pages.size() == 1);
+
+    // 「甲」は 1 行目の位置、「二」は 2 行目、「乙」は 3 行目にある
+    const uint32_t gKou = fx.jp->glyphIndex(U'甲'), gNi = fx.jp->glyphIndex(U'二'), gOtsu = fx.jp->glyphIndex(U'乙');
+    float yKou = 0, yNi = 0, yOtsu = 0;
+    for (const dl::Item& item : pages[0].dl.items) {
+        if (const auto* run = std::get_if<dl::GlyphRun>(&item)) {
+            for (const dl::Glyph& g : run->glyphs) {
+                if (g.gid == gKou) yKou = g.pos.y;
+                if (g.gid == gNi) yNi = g.pos.y;
+                if (g.gid == gOtsu) yOtsu = g.pos.y;
+            }
+        }
+    }
+    CHECK(yKou < yNi);
+    CHECK(yNi < yOtsu);
+    // 横罫: 1 行目と 2 行目の境は右の列だけ（左は甲がまたぐ）→ 幅 60 未満の横罫は無く、
+    // 右列だけの罫（幅 ≈ 200）が 1 本ある
+    int rightOnly = 0;
+    const Rect body = seq.master.bodyRect(1);
+    for (const dl::Item& item : pages[0].dl.items) {
+        if (const auto* r = std::get_if<dl::RectItem>(&item)) {
+            if (r->rect.h < 1.0f && r->rect.x > body.x + 50.0f && r->rect.w > 150.0f) ++rightOnly;
+        }
+    }
+    CHECK(rightOnly == 1);
+}
+
+TEST_CASE("FlowLayouter: spanning block mid-page balances the columns above it") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+
+    page::PageSequence seq;
+    seq.master.size = Size{400, 400};
+    seq.master.margin = page::Margins{40, 40, 40, 40};
+    seq.master.writingMode = WritingMode::HorizontalTb;
+    seq.master.columns = 2;
+    seq.master.columnGap = 20;
+
+    block::Flow flow;
+    // 6 行分（1 段 150pt 幅 = 15 字/行）の本文 → 1 段 20 行あるので段 0 に全部入る
+    std::u16string t;
+    for (int i = 0; i < 9; ++i) t += u"あいうえおかきくけこ";
+    inl::Paragraph p = inl::Paragraph::plain(t, fx.style(10.0f));
+    p.style.lineHeight = 1.5f;
+    p.style.firstLineIndent = 0.0f;
+    flow.addParagraph(p);
+
+    inl::Paragraph h = inl::Paragraph::plain(u"段抜き見出し", fx.style(12.0f));
+    h.style.lineHeight = 1.5f;
+    h.style.align = Align::Start;
+    block::BlockStyle hs;
+    hs.spanColumns = true;
+    flow.addHeading(h, 1, hs);
+    flow.addParagraph(p);
+
+    page::FlowLayouter layouter(fx.fonts);
+    const auto pages = layouter.layout(flow, seq);
+    REQUIRE(pages.size() == 1);
+
+    const Rect body = seq.master.bodyRect(1);
+    const uint32_t gDan = fx.jp->glyphIndex(U'段');
+    float headingY = -1;
+    float leftMaxAbove = 0, rightMaxAbove = 0;    // 見出しより上の、左段・右段の最下行
+    int leftAbove = 0, rightAbove = 0;
+    for (const dl::Item& item : pages[0].dl.items) {
+        if (const auto* run = std::get_if<dl::GlyphRun>(&item)) {
+            for (const dl::Glyph& g : run->glyphs) if (g.gid == gDan) headingY = g.pos.y;
+        }
+    }
+    REQUIRE(headingY > body.y);
+    for (const dl::Item& item : pages[0].dl.items) {
+        if (const auto* run = std::get_if<dl::GlyphRun>(&item)) {
+            for (const dl::Glyph& g : run->glyphs) {
+                if (g.pos.y >= headingY - 1.0f) continue;
+                if (g.pos.x < body.x + body.w * 0.5f) { ++leftAbove; leftMaxAbove = std::max(leftMaxAbove, g.pos.y); }
+                else { ++rightAbove; rightMaxAbove = std::max(rightMaxAbove, g.pos.y); }
+            }
+        }
+    }
+    // 見出しの上に両段とも内容があり（バランス取り）、高さの差は 1 行以内
+    CHECK(leftAbove > 0);
+    CHECK(rightAbove > 0);
+    CHECK(std::fabs(leftMaxAbove - rightMaxAbove) <= 15.0f + 0.5f);
+    // 見出しは左段の左端から始まる（全幅）
+    bool headingAtLeft = false;
+    for (const dl::Item& item : pages[0].dl.items) {
+        if (const auto* run = std::get_if<dl::GlyphRun>(&item)) {
+            for (const dl::Glyph& g : run->glyphs) if (g.gid == gDan && g.pos.x < body.x + 1.0f) headingAtLeft = true;
+        }
+    }
+    CHECK(headingAtLeft);
 }

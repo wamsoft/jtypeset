@@ -186,3 +186,51 @@ TEST_CASE("paragraph: ruby extends block extent on the annotation side") {
     CHECK(h.lines[0].blockMin == doctest::Approx(-10.0f));   // 上へ
     CHECK(h.lines[0].blockMax == doctest::Approx(5.0f));
 }
+
+TEST_CASE("jukugo ruby: overhang within the compound, fallback to group when too long") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+    inl::ParagraphLayouter layouter(fx.fonts);
+    const inl::ConstantLineShape shape(300.0f);
+
+    // 各部分が親に収まる → モノルビと同じ（親は広がらない）
+    {
+        inl::Paragraph para = inl::Paragraph::plain(u"書生です", fx.style(10.0f));
+        para.annotations.push_back(inl::Annotation::ruby(0, 2, u"しょ|せい", inl::RubyMode::Jukugo));
+        const auto f = layouter.layout(para, WritingMode::HorizontalTb, shape);
+        REQUIRE(f.lines.size() == 1);
+        CHECK(f.lines[0].naturalLength == doctest::Approx(40.0f).epsilon(0.01));
+        CHECK(f.lines[0].glyphs.size() == 4 + 4);
+    }
+    // 「にんげんじゅう」(7 字 = 35pt) は親 3 字 (30pt) より長い → グループとして親を広げる
+    {
+        inl::Paragraph para = inl::Paragraph::plain(u"人間中で", fx.style(10.0f));
+        para.annotations.push_back(inl::Annotation::ruby(0, 3, u"にん|げん|じゅう", inl::RubyMode::Jukugo));
+        const auto f = layouter.layout(para, WritingMode::HorizontalTb, shape);
+        REQUIRE(f.lines.size() == 1);
+        CHECK(f.lines[0].naturalLength > 40.0f);
+    }
+    // 「しょう|しゃ」(5 字 = 25pt) は親 2 字 (20pt) より長いが、熟語内で前後にずらせば…収まらない
+    // → 「じょ|うしゃ」のような 2+3 で 25pt > 20pt もグループ。3 字の親に 2+2+1 (25pt ≤ 30pt) は熟語内で収まる
+    {
+        inl::Paragraph para = inl::Paragraph::plain(u"大学生の", fx.style(10.0f));
+        para.annotations.push_back(inl::Annotation::ruby(0, 3, u"だい|がく|せい", inl::RubyMode::Jukugo));
+        const auto f = layouter.layout(para, WritingMode::HorizontalTb, shape);
+        REQUIRE(f.lines.size() == 1);
+        // 各部分 2 字 (10pt) は親 1 字 (10pt) に収まるのでモノルビ経路
+        CHECK(f.lines[0].naturalLength == doctest::Approx(40.0f).epsilon(0.01));
+        inl::Paragraph para2 = inl::Paragraph::plain(u"大学生の", fx.style(10.0f));
+        para2.annotations.push_back(inl::Annotation::ruby(0, 3, u"だいい|がく|せ", inl::RubyMode::Jukugo));
+        const auto f2 = layouter.layout(para2, WritingMode::HorizontalTb, shape);
+        REQUIRE(f2.lines.size() == 1);
+        // 「だいい」(15pt) は親 1 字からはみ出すが熟語 3 字 (30pt) には収まる → 親は広がらない
+        CHECK(f2.lines[0].naturalLength == doctest::Approx(40.0f).epsilon(0.01));
+        // ルビのグリフは親範囲の先頭から 0 以上、30pt 以下に収まる
+        for (const inl::PlacedGlyph& g : f2.lines[0].glyphs) {
+            if (g.size < 6.0f) {
+                CHECK(g.inline_ >= -0.01f);
+                CHECK(g.inline_ <= 30.0f + 0.01f);
+            }
+        }
+    }
+}

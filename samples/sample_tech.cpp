@@ -211,6 +211,33 @@ int main() {
         t.block.spaceAfter = 8.0f;
         flow.addTable(std::move(t));
     }
+    para(u"次の表は rowspan の例。左の列のセルが 2 行・3 行にまたがり、またいだ行はページの境で分かれない。");
+    {
+        block::TableBlock t;
+        t.columns = {block::TableColumn{0.0f, Align::Center}, block::TableColumn{0.0f, Align::Start},
+                     block::TableColumn{0.0f, Align::Start}};
+        t.fullWidth = false;
+        t.align = Align::Center;
+        auto cell = [&](const char16_t* s, const TextStyle& st, int colspan = 1, int rowspan = 1) {
+            block::TableCell c;
+            c.paras.push_back(inl::Paragraph::plain(s, st, cellStyle));
+            c.colspan = colspan;
+            c.rowspan = rowspan;
+            return c;
+        };
+        block::TableRow head;
+        head.header = true;
+        head.cells = {cell(u"出力", cellHead), cell(u"形式", cellHead), cell(u"備考", cellHead)};
+        t.rows.push_back(head);
+        block::TableRow r1; r1.cells = {cell(u"ラスタ", cellText, 1, 2), cell(u"PNG", cellText), cell(u"zlib で自前エンコード", cellText)};
+        block::TableRow r2; r2.cells = {cell(u"ARGB8888", cellText), cell(u"組み込み用のバッファ出力", cellText)};
+        block::TableRow r3; r3.cells = {cell(u"ベクター", cellText, 1, 3), cell(u"PDF", cellText), cell(u"Identity-H、hb-subset、Flate", cellText)};
+        block::TableRow r4; r4.cells = {cell(u"SVG", cellText), cell(u"グリフは defs + use", cellText)};
+        block::TableRow r5; r5.cells = {cell(u"表示リスト", cellText), cell(u"エンジン側で描く場合の受け渡し", cellText)};
+        for (auto* r : {&r1, &r2, &r3, &r4, &r5}) t.rows.push_back(*r);
+        t.block.spaceAfter = 8.0f;
+        flow.addTable(std::move(t));
+    }
 
     heading(u"4. 罫線と 2 段組", h2, 2, 8.0f, 4.0f);
     para(u"次の罫線の後で段数を 2 に切り替える。段数の変更はページ単位なので、ここで改ページになる。");
@@ -231,6 +258,21 @@ int main() {
     }
     for (int i = 0; i < 4; ++i) {
         para(u"右寄せの図を回り込む段落。段の途中に置かれた図は、その段の排除領域として残りの段落に効く。");
+    }
+
+    // 段の途中の段抜き見出し: 上の段の内容を揃えてから全幅に置き、その下で段を再開する
+    {
+        inl::Paragraph p = inl::Paragraph::plain(u"5. 段の途中の段抜き（段のバランス取り）", h2, headStyle);
+        block::BlockStyle bs;
+        bs.keepWithNext = true;
+        bs.spanColumns = true;
+        bs.spaceBefore = 10.0f;
+        bs.spaceAfter = 4.0f;
+        flow.addHeading(std::move(p), 2, bs);
+    }
+    for (int i = 0; i < 3; ++i) {
+        para(u"段抜きの見出しの下で段が再開する。見出しの上では、そのページの段の内容を先頭から組み直して"
+             u"各段の高さを揃えている。行分割は段の幅だけで決まるので、組み直しても行の切れ目は変わらない。");
     }
 
     page::FlowLayouter layouter(fonts);

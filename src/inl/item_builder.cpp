@@ -147,6 +147,51 @@ RubyResult layoutRuby(const std::u16string& rubyText, const ItemBuildContext& ct
     return out;
 }
 
+/**
+ * 熟語ルビ — 親文字 1 字ずつのルビを、はみ出す分だけ隣の親文字へ掛けて並べる
+ *
+ * 前提: 各部分の長さの合計が親文字列の長さ以下（超える場合は呼び出し側がグループルビへ落とす）。
+ * 各部分を親の中央に置きたい位置から始め、前の部分との重なりを解消し、末端を超えた分を戻す。
+ * @return 親範囲の先頭からの相対位置で置いたグリフ列
+ */
+RubyResult layoutJukugoRuby(const std::vector<ShapedText>& parts, const std::vector<Pt>& parentWidths,
+                            Pt em, Pt rubySize, uint32_t styleIndex, WritingMode wm) {
+    RubyResult out;
+    const size_t n = parts.size();
+    if (n == 0 || n != parentWidths.size()) return out;
+
+    std::vector<Pt> pStart(n + 1, 0.0f);
+    for (size_t i = 0; i < n; ++i) pStart[i + 1] = pStart[i] + parentWidths[i];
+    const Pt total = pStart[n];
+
+    std::vector<Pt> x(n);
+    for (size_t i = 0; i < n; ++i) x[i] = pStart[i] + (parentWidths[i] - parts[i].advance) * 0.5f;
+    // 前から: 重なりを解消
+    x[0] = std::max(0.0f, x[0]);
+    for (size_t i = 1; i < n; ++i) x[i] = std::max(x[i], x[i - 1] + parts[i - 1].advance);
+    // 後ろから: 末端を超えた分を戻す
+    x[n - 1] = std::min(x[n - 1], total - parts[n - 1].advance);
+    for (size_t i = n - 1; i > 0; --i) x[i - 1] = std::min(x[i - 1], x[i] - parts[i - 1].advance);
+    x[0] = std::max(0.0f, x[0]);
+
+    const float side = annotationSide(wm);
+    const Pt shift = side * (em * 0.5f + rubySize * 0.5f);
+    if (side > 0.0f) out.extentMax = em * 0.5f + rubySize;
+    else             out.extentMin = -(em * 0.5f + rubySize);
+
+    for (size_t i = 0; i < n; ++i) {
+        for (const PlacedGlyph& src : parts[i].glyphs) {
+            PlacedGlyph g = src;
+            g.block += shift;
+            g.inline_ += x[i];
+            g.styleIndex = styleIndex;
+            out.glyphs.push_back(std::move(g));
+        }
+    }
+    out.valid = true;
+    return out;
+}
+
 //------------------------------------------------------------------------------
 // 縦中横・割注（Box 本体を差し替えるもの）
 //------------------------------------------------------------------------------
@@ -450,9 +495,65 @@ std::vector<LineItem> buildLineItems(const ShapedText& shaped,
         case AnnotationType::Ruby: {
             const Pt rubySize = em * r.ann->scale;
             std::vector<std::u16string> parts;
-            if (r.ann->rubyMode == RubyMode::Mono) parts = splitMonoRuby(r.ann->text);
+            if (r.ann->rubyMode != RubyMode::Group) parts = splitMonoRuby(r.ann->text);
 
-            if (r.ann->rubyMode == RubyMode::Mono && static_cast<int>(parts.size()) == parentCount) {
+            // 熟語ルビ: 各部分を組んで、親に収まるか／熟語に収まるかで置き方を決める
+            bool jukugoHandled = false;
+            if (r.ann->rubyMode == RubyMode::Jukugo && static_cast<int>(parts.size()) == parentCount) {
+                const TextStyle rubyStyle = derivedStyle(ctx, rubySize);
+                std::vector<ShapedText> shapedParts;
+                std::vector<Pt> pw;
+                bool allFit = true;
+                Pt totalRuby = 0.0f;
+                for (int pi = 0; pi < parentCount; ++pi) {
+                    shapedParts.push_back(shapeText(parts[pi], rubyStyle, ctx.fonts, ctx.writingMode,
+                                                    TextOrientation::Mixed));
+                    pw.push_back(bodyWidths[parents[pi]]);
+                    totalRuby += shapedParts.back().advance;
+                    if (shapedParts.back().advance > pw.back() + 0.01f) allFit = false;
+                }
+                if (allFit) {
+                    // 全部が親に収まる: 下のモノルビ経路で 1 字ずつ中付きにする
+                } else if (totalRuby <= parentWidth + 0.01f) {
+                    RubyResult rr = layoutJukugoRuby(shapedParts, pw, em, rubySize, si, ctx.writingMode);
+                    if (rr.valid) {
+                        const uint32_t head = parents.front();
+                        attached[head].insert(attached[head].end(), rr.glyphs.begin(), rr.glyphs.end());
+                        extentMin[head] = std::min(extentMin[head], rr.extentMin);
+                        extentMax[head] = std::max(extentMax[head], rr.extentMax);
+                        for (uint32_t ci = r.clusterStart + 1; ci < r.clusterEnd; ++ci) noBreak[ci] = 1;
+                        jukugoHandled = true;
+                    }
+                } else {
+                    // 熟語全体でも収まらない: グループルビとして親文字列を広げる
+                    std::u16string joined;
+                    for (const std::u16string& p : parts) joined += p;
+                    const bool hangBefore = (r.clusterStart > 0) &&
+                        canRubyOverhang(shaped.clusters[r.clusterStart - 1].charClass);
+                    const bool hangAfter = (r.clusterEnd < clusterCount) &&
+                        canRubyOverhang(shaped.clusters[r.clusterEnd].charClass);
+                    RubyResult rr = layoutRuby(joined, ctx, em, rubySize, parentWidth, parentCount,
+                                               hangBefore, hangAfter, si);
+                    if (rr.valid) {
+                        const uint32_t head = parents.front();
+                        attached[head].insert(attached[head].end(), rr.glyphs.begin(), rr.glyphs.end());
+                        extentMin[head] = std::min(extentMin[head], rr.extentMin);
+                        extentMax[head] = std::max(extentMax[head], rr.extentMax);
+                        if (rr.endGap > 0.0f) {
+                            gapBefore[r.clusterStart] += rr.endGap;
+                            gapBefore[r.clusterEnd] += rr.endGap;
+                        }
+                        if (rr.innerGap > 0.0f) {
+                            for (int pi = 1; pi < parentCount; ++pi) gapBefore[parents[pi]] += rr.innerGap;
+                        }
+                        for (uint32_t ci = r.clusterStart + 1; ci < r.clusterEnd; ++ci) noBreak[ci] = 1;
+                    }
+                    jukugoHandled = true;
+                }
+            }
+            if (jukugoHandled) break;
+
+            if (r.ann->rubyMode != RubyMode::Group && static_cast<int>(parts.size()) == parentCount) {
                 for (int pi = 0; pi < parentCount; ++pi) {
                     const uint32_t k = parents[pi];
                     RubyResult rr = layoutRuby(parts[pi], ctx, em, rubySize, bodyWidths[k], 1,

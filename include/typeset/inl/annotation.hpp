@@ -28,6 +28,10 @@ enum class AnnotationType : uint8_t {
 enum class RubyMode : uint8_t {
     Group,  ///< グループルビ。親文字列全体に 1 つのルビを中付きで配置する
     Mono,   ///< モノルビ。text を `|` で区切って親文字 1 文字ずつに対応させる
+    /// 熟語ルビ。text を `|` で区切って親文字 1 文字ずつに対応させるが、はみ出す部分は
+    /// 熟語内の隣の親文字に掛ける（JLReq 3.3.8）。全部が親に収まればモノルビと同じ、
+    /// 熟語全体でも収まらなければグループルビとして親文字列を広げる
+    Jukugo,
 };
 
 enum class EmphasisMark : uint8_t {

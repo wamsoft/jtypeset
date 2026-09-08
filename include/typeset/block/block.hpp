@@ -115,6 +115,7 @@ struct TableColumn {
 struct TableCell {
     std::vector<inl::Paragraph> paras;
     int colspan = 1;
+    int rowspan = 1;    ///< 下の行へまたぐ。またいだ行はページをまたがない（まとめて次の段へ）
 };
 
 struct TableRow {

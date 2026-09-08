@@ -173,7 +173,8 @@ PYBIND11_MODULE(typeset, m) {
     // ---- 注記・段落 ----
     py::enum_<inl::RubyMode>(m, "RubyMode")
         .value("GROUP", inl::RubyMode::Group)
-        .value("MONO", inl::RubyMode::Mono);
+        .value("MONO", inl::RubyMode::Mono)
+        .value("JUKUGO", inl::RubyMode::Jukugo);
     py::enum_<inl::EmphasisMark>(m, "EmphasisMark")
         .value("SESAME", inl::EmphasisMark::Sesame)
         .value("OPEN_SESAME", inl::EmphasisMark::OpenSesame)
@@ -271,12 +272,13 @@ PYBIND11_MODULE(typeset, m) {
         .def_readwrite("align", &block::TableColumn::align);
     py::class_<block::TableCell>(m, "TableCell")
         .def(py::init<>())
-        .def(py::init([](inl::Paragraph p, int colspan) {
-                 block::TableCell c; c.paras.push_back(std::move(p)); c.colspan = colspan; return c;
+        .def(py::init([](inl::Paragraph p, int colspan, int rowspan) {
+                 block::TableCell c; c.paras.push_back(std::move(p)); c.colspan = colspan; c.rowspan = rowspan; return c;
              }),
-             py::arg("paragraph"), py::arg("colspan") = 1)
+             py::arg("paragraph"), py::arg("colspan") = 1, py::arg("rowspan") = 1)
         .def_readwrite("paras", &block::TableCell::paras)
-        .def_readwrite("colspan", &block::TableCell::colspan);
+        .def_readwrite("colspan", &block::TableCell::colspan)
+        .def_readwrite("rowspan", &block::TableCell::rowspan);
     py::class_<block::TableRow>(m, "TableRow")
         .def(py::init<>())
         .def(py::init([](std::vector<block::TableCell> cells, bool header) {
