@@ -6,12 +6,23 @@
   "dependencies": [
     {
       "name": "freetype",
-      "features": ["png", "zlib"]
+      "features": [
+        "png",
+        "zlib"
+      ]
     },
     "harfbuzz",
     "libunibreak",
     "zlib",
     "stb",
     "doctest"
-  ]
+  ],
+  "features": {
+    "microtex": {
+      "description": "MicroTeX handler sample (LaTeX math objects)",
+      "dependencies": [
+        "tinyxml2"
+      ]
+    }
+  }
 }

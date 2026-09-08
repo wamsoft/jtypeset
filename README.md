@@ -56,6 +56,11 @@ make test
 ./build/x64-windows/Release/sample_tech.exe     # 技術文書（A4 横組み、回り込みの図、表、2 段組）
 ./build/x64-windows/Release/sample_report.exe   # レポート（目次、見出し採番、図表番号と相互参照、箇条書き、コード、しおり）
 ./build/x64-windows/Release/sample_objects.exe  # 外部オブジェクト（関数ハンドラの分数、外部コマンドのグラフ、SVG、式番号）
+
+# MicroTeX（LaTeX 数式）ハンドラ: 任意ターゲット。tinyxml2 は vcpkg の feature で入る
+make prebuild GLYPHWARE_DIR=d:/work/kirikiri/glyphware CMAKEOPT="-DTYPESET_HANDLER_MICROTEX=ON -DVCPKG_MANIFEST_FEATURES=microtex"
+make build
+./build/x64-windows/handlers/microtex/Release/sample_microtex.exe   # 行内・別行立ての数式、式番号、\text{} の和文
 ```
 
 ## できること（2026-09 時点）
@@ -67,8 +72,9 @@ make test
 - ページマスタ（判型・内外余白・段組・柱・ノンブル）、改ページ制御（orphans / widows / keepWithNext / keepTogether）、
   段の途中の段抜きと最終ページの段揃え、目次、図表番号と相互参照（`{ref:label}` `{page:label}`）
 - 外部オブジェクトの差し込み: 本文に「ハンドラ名＋ソース」を書き、登録した関数／外部コマンドが返す SVG や描画命令を
-  行内（ベースライン揃え）・別行立て（式番号・`{ref:}` 参照）に置く。数式レンダラ（MathJax / dvisvgm / Typst / MicroTeX）や
-  グラフ（matplotlib）を本体に依存を足さずにつなげる
+  行内（ベースライン揃え）・別行立て（式番号・`{ref:}` 参照）に置く。数式レンダラ（MathJax / dvisvgm / Typst）や
+  グラフ（matplotlib）を本体に依存を足さずにつなげる。LaTeX 数式は `handlers/microtex/`（MicroTeX、任意ターゲット）で
+  数式フォントのグリフとして PDF に埋め込まれる
 - 出力: ラスタ（PNG）、PDF（Identity-H・hb-subset・Flate・画像・しおり）、SVG。Python バインディング
 
 ## Python

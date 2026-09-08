@@ -56,6 +56,8 @@ obj/       ObjectRegistry     外部オブジェクト（数式・グラフ）�
            svg_import         SVG サブセット → dl（path 全コマンド・基本図形・defs/use・transform・塗り線）。
                               ベースラインは <!-- typeset baseline="pt" --> か vertical-align(ex)
 python/    pybind11 モジュール（psdparse と同じ構成）
+handlers/  microtex/          MicroTeX（LaTeX 数式）のサンプルハンドラ。任意ターゲット（TYPESET_HANDLER_MICROTEX、vcpkg feature microtex）。
+                              tex::Font / TextLayout / Graphics2D を実装して数式を GlyphRun + Path で返す。本体は依存しない
 ```
 
 ## 設計上の約束（変えるときは 設計.md も直す）
