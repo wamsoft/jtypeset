@@ -19,6 +19,7 @@ markdown_extensions:
   - tables
   - fenced_code
   - admonition
+  - attr_list
 
 exclude_docs: |
   Doxyfile
@@ -33,6 +34,7 @@ validation:
 nav:
   - はじめに: index.md
   - Markdown → PDF の手引き: markdown.md
+  - サンプル（Markdown と PDF）: samples.md
   - Python ガイド: python_guide.md
   - C++ ガイド: cpp_guide.md
   - 技術解説: architecture.md

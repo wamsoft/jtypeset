@@ -5,6 +5,7 @@
 #include "typeset/inl/paragraph.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 #include "typeset/inl/item_builder.hpp"
 #include "typeset/inl/shaper.hpp"

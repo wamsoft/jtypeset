@@ -34,5 +34,5 @@ Windows / CPython 3.12 の wheel を用意しています。ほかの環境は [
 
 ## 出力例
 
-`samples/markdown/report.md` を横組み A4 と縦組み A5 で組んだもの（リポジトリの `out/` に生成されます）。
+[サンプル](samples.md) に、同じ Markdown を横組み A4 と縦組み A5 で組んだ PDF と 1 ページ目の画像があります。
 サンプルの C++ プログラム（台本・小説・技術文書・レポート）は `samples/` にあります。

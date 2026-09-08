@@ -1,5 +1,6 @@
 #include "typeset/text/utf.hpp"
 
+#include <cstdint>
 namespace typeset::text {
 
 std::u16string utf8ToUtf16(const std::string& utf8) {

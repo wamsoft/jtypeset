@@ -40,7 +40,7 @@ endif
 
 BUILD_PATH=$(shell cmake --preset $(PRESET) -N | grep BUILD_DIR | sed 's/.*BUILD_DIR="\(.*\)"/\1/')
 
-.PHONY: prebuild build clean test fontdata docs pydocs site
+.PHONY: prebuild build clean test fontdata docs pydocs site samples-md
 
 all: build
 
@@ -81,3 +81,9 @@ site:
 	mkdir -p build/site/cpp build/site/python
 	cp -r build/docs/cpp/html build/site/cpp/
 	cp -r build/docs/python/. build/site/python/
+
+# ドキュメント用のサンプル PDF（Markdown と対になるもの）を再生成する。ビルド済みの python パッケージと data/ のフォントを使う
+samples-md:
+	PYTHONPATH=$(PYPKG) python -m jtypeset.md samples/markdown/report.md -o docs/samples/report.pdf --png 90
+	PYTHONPATH=$(PYPKG) python -m jtypeset.md samples/markdown/report.md -o docs/samples/report_vertical.pdf --vertical --paper A5 --png 90
+	rm -f docs/samples/report_p[2-9]*.png docs/samples/report_vertical_p[2-9]*.png
