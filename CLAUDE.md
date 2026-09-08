@@ -46,7 +46,8 @@ page/      PageMaster/Region  判型・余白・段。Region は排除領域（�
                               段組ページの途中の段抜きと最終ページの段揃えは、ページの再開点（pageStart_）から段を縮めて
                               組み直す試行モード（trial_ / trialOverflow_）で行う。再開点には採番状態（pageNumbering_）も持つ。
                               見出しの採番・図表番号・相互参照（{ref:} {page:}）・目次は 2〜3 パス（RefInfo を次パスへ渡す）。
-                              表は owner グリッド（colspan / rowspan）で罫線を決め、段より高い行はセルごとに続きから分ける
+                              表は owner グリッド（colspan / rowspan）で罫線を決め、段より高い行はセルごとに続きから分ける。
+                              脚注は段落を組む前に番号を振り、断片に載る注の高さを Region::reserved に確保して finishPage で描く
 dl/        DisplayList        GlyphRun / Path / Rect / Image / Group。レイアウトと backend の分割線
            glyph_transform    グリフ固有の変形（回転・平体長体・斜体）。3 backend で共有
 backend/   raster             glyphware のカバレッジマスク＋自前合成。パスは自前スキャンライン AA。PNG 出力

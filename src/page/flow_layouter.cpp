@@ -173,6 +173,7 @@ private:
     int figureCount_ = 0;
     int tableCount_ = 0;
     int equationCount_ = 0;
+    int footnoteCount_ = 0;
 
     /// ブロックを置く前の採番・収集の状態（巻き戻し用）
     struct NumberingState {
@@ -180,11 +181,12 @@ private:
         int figureCount = 0;
         int tableCount = 0;
         int equationCount = 0;
+        int footnoteCount = 0;
         size_t collectedHeadings = 0;
         std::map<std::u16string, std::u16string> collectedFields;
     };
     NumberingState snapshotNumbering() const {
-        return NumberingState{headingCounters_, figureCount_, tableCount_, equationCount_,
+        return NumberingState{headingCounters_, figureCount_, tableCount_, equationCount_, footnoteCount_,
                               collected_.headings.size(), collected_.fields};
     }
     void restoreNumbering(const NumberingState& s) {
@@ -192,6 +194,7 @@ private:
         figureCount_ = s.figureCount;
         tableCount_ = s.tableCount;
         equationCount_ = s.equationCount;
+        footnoteCount_ = s.footnoteCount;
         collected_.headings.resize(std::min(s.collectedHeadings, collected_.headings.size()));
         collected_.fields = s.collectedFields;
     }
@@ -203,7 +206,15 @@ private:
         size_t regionIndex = 0;
         size_t itemStart = 0;   ///< その段のページ dl に足した位置
         Pt usedBefore = 0.0f;
+        Pt reservedBefore = 0.0f;       ///< 脚注の確保量（巻き戻し用）
+        size_t footnotesBefore = 0;
         NumberingState numbering;   ///< ブロックを置く前の採番状態
+    };
+
+    /// 段落中の脚注（本文の位置と注の本文）
+    struct FootnoteAt {
+        size_t charIndex = 0;
+        inl::Paragraph note;
     };
     std::optional<Pending> pending_;
     size_t blockItemStart_ = 0;     ///< いま置いているブロックの最初の dl 位置
@@ -319,6 +330,16 @@ private:
     /// maxLines 行以内で組み、行内オブジェクトで広がった行送りが available に入らなければ行数を減らす
     inl::ParagraphFragment layoutFitting(const inl::Paragraph& para, const inl::LineShapeProvider& shape,
                                          size_t charStart, int maxLines, Pt available);
+    /// 脚注の記号を番号にし、注の一覧（本文中の位置付き）を返す。charStart0 より前の脚注は前の段で数え済み
+    std::vector<FootnoteAt> numberFootnotes(inl::Paragraph& para, size_t charStart0);
+    /// 断片 [charStart, charEnd) に載る脚注に要る段末の量（罫を含む）
+    Pt footnoteExtent(const std::vector<FootnoteAt>& notes, size_t charStart, size_t charEnd,
+                      const Region& reg, std::vector<const FootnoteAt*>* picked = nullptr);
+    Pt footnoteRuleExtent() const {
+        return opts_.footnoteGap + opts_.footnoteRuleThickness + opts_.footnoteRuleGap;
+    }
+    /// 段 ri に溜まった脚注を段末に描く
+    void flushFootnotes(size_t ri);
 };
 
 //------------------------------------------------------------------------------
@@ -352,6 +373,7 @@ void Flower::newPage() {
 
 void Flower::finishPage() {
     if (pages_.empty()) return;
+    for (size_t ri = 0; ri < regions_.size(); ++ri) flushFootnotes(ri);
     if (opts_.drawGuides) drawGuides();
     if (master().header) layoutRunning(*master().header, true);
     if (master().footer) layoutRunning(*master().footer, false);
@@ -1495,6 +1517,81 @@ void Flower::placeTable(const block::TableBlock& table) {
 }
 
 //------------------------------------------------------------------------------
+// 脚注
+//------------------------------------------------------------------------------
+
+std::vector<Flower::FootnoteAt> Flower::numberFootnotes(inl::Paragraph& para, size_t charStart0) {
+    std::vector<FootnoteAt> out;
+    bool any = false;
+    for (const inl::InlineRun& r : para.runs) if (r.footnote) { any = true; break; }
+    if (!any) return out;
+
+    auto format = [&](const std::u16string& fmt, int n) {
+        return substitute(inl::Paragraph::plain(fmt, TextStyle{}), {{u"n", toU16(n)}}).text();
+    };
+    // 1 回目: 仮に「いまの続き」で番号を付けて位置を求め、charStart0 より前（前の段で数え済み）の個数を知る
+    auto assign = [&](int base) {
+        out.clear();
+        size_t pos = 0;
+        int n = base;
+        for (inl::InlineRun& r : para.runs) {
+            if (r.footnote) {
+                ++n;
+                r.text = format(opts_.footnoteMarkerFormat, n);
+                FootnoteAt fa;
+                fa.charIndex = pos;
+                fa.note = resolved(*r.footnote);
+                inl::InlineRun label;
+                label.text = format(opts_.footnoteLabelFormat, n);
+                label.style = fa.note.baseStyle();
+                fa.note.runs.insert(fa.note.runs.begin(), std::move(label));
+                out.push_back(std::move(fa));
+            }
+            pos += r.text.size();
+        }
+        return n;
+    };
+    assign(footnoteCount_);
+    int before = 0;
+    for (const FootnoteAt& fa : out) if (fa.charIndex < charStart0) ++before;
+    footnoteCount_ = assign(footnoteCount_ - before);
+    return out;
+}
+
+Pt Flower::footnoteExtent(const std::vector<FootnoteAt>& notes, size_t charStart, size_t charEnd,
+                          const Region& reg, std::vector<const FootnoteAt*>* picked) {
+    Pt total = 0.0f;
+    bool anyPicked = false;
+    for (const FootnoteAt& fa : notes) {
+        if (fa.charIndex < charStart || fa.charIndex >= charEnd) continue;
+        total += measureParagraph(fa.note, reg.lineLength());
+        anyPicked = true;
+        if (picked) picked->push_back(&fa);
+    }
+    if (anyPicked && reg.footnotes.empty()) total += footnoteRuleExtent();
+    return total;
+}
+
+void Flower::flushFootnotes(size_t ri) {
+    Region& reg = regions_[ri];
+    if (reg.footnotes.empty()) return;
+    const size_t saved = regionIndex_;
+    regionIndex_ = ri;
+    const Pt L = reg.lineLength();
+    Pt b = reg.blockExtent() - reg.reserved + opts_.footnoteGap;
+    if (opts_.footnoteRuleThickness > 0.0f && opts_.footnoteRuleLength > 0.0f) {
+        const Rect r = reg.toRect(0.0f, L * opts_.footnoteRuleLength, b, b + opts_.footnoteRuleThickness);
+        page().dl.addRect(r, reg.footnotes.front().baseStyle().fill);
+    }
+    b += opts_.footnoteRuleThickness + opts_.footnoteRuleGap;
+    for (const inl::Paragraph& note : reg.footnotes) {
+        b += placeParagraphAt(note, b - reg.used, 0.0f, L);   // placeParagraphAt は used からの相対
+    }
+    reg.footnotes.clear();
+    regionIndex_ = saved;
+}
+
+//------------------------------------------------------------------------------
 // 段落
 //------------------------------------------------------------------------------
 
@@ -1519,7 +1616,8 @@ void Flower::placeParagraphs(const std::vector<const inl::Paragraph*>& paras,
 void Flower::flowParagraph(const inl::Paragraph& paraIn, const block::BlockStyle& style,
                            const inl::Paragraph* labelIn, Pt labelWidth, Pt labelGap,
                            bool firstOfBlock, size_t charStart0, bool labelPlaced0) {
-    const inl::Paragraph para = resolved(paraIn);
+    inl::Paragraph para = resolved(paraIn);
+    const std::vector<FootnoteAt> footnotes = numberFootnotes(para, charStart0);
     std::optional<inl::Paragraph> labelResolved;
     if (labelIn) labelResolved = resolved(*labelIn);
     const inl::Paragraph* label = labelResolved ? &*labelResolved : nullptr;
@@ -1547,6 +1645,8 @@ void Flower::flowParagraph(const inl::Paragraph& paraIn, const block::BlockStyle
                 pending_.reset();
                 page().dl.items.resize(pend.itemStart);
                 region().used = pend.usedBefore;
+                region().reserved = pend.reservedBefore;
+                region().footnotes.resize(std::min(pend.footnotesBefore, region().footnotes.size()));
                 restoreNumbering(pend.numbering);
                 const size_t myBlock = curBlockIndex_;
                 const int myPara = curParaIndex_;
@@ -1612,8 +1712,16 @@ void Flower::flowParagraph(const inl::Paragraph& paraIn, const block::BlockStyle
         inl::ParagraphFragment frag = layoutFitting(para, shape, charStart, fit, reg.remaining());
         const bool starting = (charStart == 0);
 
-        // 1 行でも入らない（行内オブジェクトで行送りが広がった）: 次の段へ
-        if (frag.lines.size() == 1 && frag.blockExtent() > reg.remaining() + kEps &&
+        // この断片に載る脚注のぶんも段末に要る: 入らなければ行数を減らす
+        Pt notesExtent = footnotes.empty() ? 0.0f : footnoteExtent(footnotes, frag.charStart, frag.charEnd, reg);
+        while (!footnotes.empty() && frag.lines.size() > 1 &&
+               frag.blockExtent() + notesExtent > reg.remaining() + kEps) {
+            frag = layouter_.layout(para, wm(), shape, charStart, static_cast<int>(frag.lines.size()) - 1);
+            notesExtent = footnoteExtent(footnotes, frag.charStart, frag.charEnd, reg);
+        }
+
+        // 1 行でも入らない（行内オブジェクトで行送りが広がった／脚注が大きい）: 次の段へ
+        if (frag.lines.size() == 1 && frag.blockExtent() + notesExtent > reg.remaining() + kEps &&
             !reg.fresh() && !forceHere) {
             reg.used = segTop;
             moveToNextRegion();
@@ -1656,6 +1764,8 @@ void Flower::flowParagraph(const inl::Paragraph& paraIn, const block::BlockStyle
         // 置く
         const size_t itemStart = page().dl.items.size();
         const Pt usedBefore = reg.used;
+        const Pt reservedBefore = reg.reserved;
+        const size_t footnotesBefore = reg.footnotes.size();
         const Point origin = reg.lineOrigin(0.0f, pitch);
         inl::emitParagraph(page().dl, frag, wm(), origin);
 
@@ -1673,6 +1783,12 @@ void Flower::flowParagraph(const inl::Paragraph& paraIn, const block::BlockStyle
             labelPlaced = true;
         }
         reg.used += consumed;
+        if (notesExtent > 0.0f) {
+            std::vector<const FootnoteAt*> picked;
+            footnoteExtent(footnotes, frag.charStart, frag.charEnd, reg, &picked);
+            reg.reserved += notesExtent;
+            for (const FootnoteAt* fn : picked) reg.footnotes.push_back(fn->note);
+        }
 
         // 背景（末尾の余白は最後の断片だけ）
         if (decorated) {
@@ -1688,6 +1804,8 @@ void Flower::flowParagraph(const inl::Paragraph& paraIn, const block::BlockStyle
             pend.regionIndex = regionIndex_;
             pend.itemStart = std::min(itemStart, blockItemStart_);
             pend.usedBefore = std::min(usedBefore, segTop);
+            pend.reservedBefore = reservedBefore;
+            pend.footnotesBefore = footnotesBefore;
             pend.blockIndex = curBlockIndex_;
             pend.numbering = blockNumbering_;
             pending_ = pend;   // blk は placeBlock が埋める

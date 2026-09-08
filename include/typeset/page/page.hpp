@@ -77,12 +77,15 @@ struct Region {
     Pt used = 0.0f;             ///< 行送り方向に使った量
     /// 回り込みの排除領域（ページ座標）。段が変わると消える
     std::vector<Rect> exclusions;
+    /// 段末に確保した量（脚注）と、段末に置く脚注（FlowLayouter がページを閉じるときに描く）
+    Pt reserved = 0.0f;
+    std::vector<inl::Paragraph> footnotes;
 
     /// 行の長さ（縦組みなら段の高さ、横組みなら幅）
     Pt lineLength() const { return isVertical(writingMode) ? area.h : area.w; }
     /// 行送り方向の全長
     Pt blockExtent() const { return isVertical(writingMode) ? area.w : area.h; }
-    Pt remaining() const { return blockExtent() - used; }
+    Pt remaining() const { return blockExtent() - used - reserved; }
     bool fresh() const { return used <= 0.0f; }
 
     /// used + offset の位置に始まる、行送り pitch の 1 行目の行頭（中心線上の点）

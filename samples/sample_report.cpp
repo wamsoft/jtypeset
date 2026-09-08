@@ -166,8 +166,26 @@ int main() {
     para(u"本レポートは、typeset 組版エンジンの評価結果をまとめたものである。第 {ref:sec-arch} 章で構成を述べ、"
          u"第 {ref:sec-eval} 章（{page:sec-eval} ページ）で評価結果を示す。図 {ref:fig-arch} に全体の構成を、"
          u"表 {ref:tab-bench} に出力先ごとの比較を示す。");
-    para(u"レポートに必要な要素として、見出しの自動採番、目次、図表番号と相互参照、箇条書き、コードブロック、"
-         u"行内の小さな画像、表のセルの縦位置、長いセルのページまたぎ、PDF のしおりを確認する。");
+    {
+        // 脚注: 本文中の記号は上付き、注はこの段の末尾に置かれる（番号は文書を通して連番）
+        TextStyle noteStyle = body;
+        noteStyle.size = 8.0f;
+        const TextStyle marker = inl::superscriptStyle(body);
+        inl::Paragraph p;
+        p.style = bodyStyle;
+        p.runs.push_back(inl::InlineRun{u"レポートに必要な要素として、見出しの自動採番、目次、図表番号と相互参照", body});
+        p.addFootnote(inl::Paragraph::plain(u"相互参照は {ref:label} と {page:label} で、番号とページを別々に引ける。", noteStyle), marker);
+        p.runs.push_back(inl::InlineRun{u"、箇条書き、コードブロック、行内の小さな画像、表のセルの縦位置、長いセルのページまたぎ、"
+                                        u"PDF のしおり、脚注", body});
+        p.addFootnote(inl::Paragraph::plain(u"脚注は記号のある行が載った段の末尾に集まり、本文との間に短い罫が入る。"
+                                            u"段に入らなければ本文ごと次の段へ送られる。", noteStyle), marker);
+        p.runs.push_back(inl::InlineRun{u"を確認する。", body});
+        block::BlockStyle bs;
+        bs.orphans = 2;
+        bs.widows = 2;
+        bs.spaceAfter = 3.0f;
+        flow.addParagraph(p, bs);
+    }
 
     heading(u"構成", 1, "sec-arch");
     heading(u"レイヤー", 2, "sec-layers");

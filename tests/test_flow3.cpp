@@ -519,3 +519,132 @@ TEST_CASE("FlowLayouter: list markers, code background and inline image") {
     }
     CHECK(xi > 30.0f + 3.0f);
 }
+
+TEST_CASE("FlowLayouter: footnotes go to the bottom of the column with superscript markers") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+
+    page::PageSequence seq;
+    seq.master.size = Size{300, 320};
+    seq.master.margin = page::Margins{20, 20, 20, 20};
+    seq.master.writingMode = WritingMode::HorizontalTb;
+
+    const TextStyle body = fx.style(10.0f);
+    const TextStyle noteStyle = fx.style(7.0f);
+    const TextStyle marker = inl::superscriptStyle(body);
+
+    block::Flow flow;
+    inl::Paragraph p;
+    p.runs.push_back(inl::InlineRun{u"脚注のある文章", body});
+    p.addFootnote(inl::Paragraph::plain(u"一つ目の注。", noteStyle), marker);
+    p.runs.push_back(inl::InlineRun{u"と、もう一つ", body});
+    p.addFootnote(inl::Paragraph::plain(u"二つ目の注は少し長くて、二行になるかもしれない文章を書いておく。", noteStyle), marker);
+    p.runs.push_back(inl::InlineRun{u"。", body});
+    flow.addParagraph(p);
+    for (int i = 0; i < 3; ++i) flow.addParagraph(inl::Paragraph::plain(u"本文が続く。本文が続く。本文が続く。", body));
+
+    page::FlowLayouter layouter(fx.fonts);
+    const auto pages = layouter.layout(flow, seq);
+    REQUIRE(pages.size() == 1);
+    const Rect bodyRect = seq.master.bodyRect(1);
+
+    float bodyBaseline = -1.0f;          // 1 行目の本文のベースライン
+    float markerY = -1.0f;
+    float noteMinY = 1e9f, noteMaxY = -1e9f;
+    float bodyMaxY = -1e9f;
+    int noteGlyphs = 0;
+    for (const dl::Item& item : pages[0].dl.items) {
+        const auto* run = std::get_if<dl::GlyphRun>(&item);
+        if (!run || run->glyphs.empty()) continue;
+        if (run->size == doctest::Approx(7.0f)) {
+            for (const dl::Glyph& g : run->glyphs) { noteMinY = std::min(noteMinY, g.pos.y); noteMaxY = std::max(noteMaxY, g.pos.y); }
+            noteGlyphs += static_cast<int>(run->glyphs.size());
+        } else if (run->size == doctest::Approx(6.0f)) {
+            if (markerY < 0.0f) markerY = run->glyphs.front().pos.y;
+        } else {
+            if (bodyBaseline < 0.0f) bodyBaseline = run->glyphs.front().pos.y;
+            for (const dl::Glyph& g : run->glyphs) bodyMaxY = std::max(bodyMaxY, g.pos.y);
+        }
+    }
+    REQUIRE(bodyBaseline > 0.0f);
+    REQUIRE(markerY > 0.0f);
+    // 記号は本文のベースラインより上（上付き）
+    CHECK(markerY < bodyBaseline - 2.0f);
+    // 注は版面の下端側にあり、本文より下
+    REQUIRE(noteGlyphs > 0);
+    CHECK(noteMaxY <= bodyRect.bottom() + 0.5f);
+    CHECK(noteMinY > bodyMaxY);
+    // 注の頭に "1 " "2 " が付く: 7pt の '1' と '2' がある
+    auto countSmall = [&](char32_t c) {
+        const uint32_t gid = fx.jp->glyphIndex(c);
+        int n = 0;
+        for (const dl::Item& item : pages[0].dl.items) {
+            if (const auto* run = std::get_if<dl::GlyphRun>(&item)) {
+                if (run->size != doctest::Approx(7.0f)) continue;
+                for (const dl::Glyph& g : run->glyphs) if (g.gid == gid) ++n;
+            }
+        }
+        return n;
+    };
+    CHECK(countSmall(U'1') == 1);
+    CHECK(countSmall(U'2') == 1);
+}
+
+TEST_CASE("FlowLayouter: footnotes push body text to the next page instead of overlapping") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+
+    page::PageSequence seq;
+    seq.master.size = Size{300, 200};
+    seq.master.margin = page::Margins{20, 20, 20, 20};
+    seq.master.writingMode = WritingMode::HorizontalTb;
+    const TextStyle body = fx.style(10.0f);
+    const TextStyle noteStyle = fx.style(8.0f);
+
+    block::Flow flow;
+    for (int i = 0; i < 4; ++i) {
+        inl::Paragraph p;
+        p.runs.push_back(inl::InlineRun{u"注のある段落", body});
+        std::u16string note;
+        for (int k = 0; k < 6; ++k) note += u"注の本文。";
+        p.addFootnote(inl::Paragraph::plain(note, noteStyle), inl::superscriptStyle(body));
+        p.runs.push_back(inl::InlineRun{u"がいくつも続く。がいくつも続く。がいくつも続く。", body});
+        flow.addParagraph(p);
+    }
+    page::FlowLayouter layouter(fx.fonts);
+    const auto pages = layouter.layout(flow, seq);
+    REQUIRE(pages.size() >= 2);
+    // どのページでも、本文（10pt）の最大 y < 注（8pt）の最小 y、注は版面内
+    int notesTotal = 0;
+    for (const page::Page& pg : pages) {
+        float bodyMax = -1e9f, noteMin = 1e9f, noteMax = -1e9f;
+        int notes = 0;
+        for (const dl::Item& item : pg.dl.items) {
+            const auto* run = std::get_if<dl::GlyphRun>(&item);
+            if (!run) continue;
+            const bool isNote = run->size == doctest::Approx(8.0f);
+            for (const dl::Glyph& g : run->glyphs) {
+                if (isNote) { noteMin = std::min(noteMin, g.pos.y); noteMax = std::max(noteMax, g.pos.y); ++notes; }
+                else if (run->size == doctest::Approx(10.0f)) bodyMax = std::max(bodyMax, g.pos.y);
+            }
+        }
+        if (notes > 0) {
+            CHECK(bodyMax < noteMin);
+            CHECK(noteMax <= seq.master.bodyRect(pg.number).bottom() + 0.5f);
+        }
+        notesTotal += notes;
+    }
+    CHECK(notesTotal > 0);
+    // 番号は連番: 8pt の '4' がある
+    const uint32_t g4 = fx.jp->glyphIndex(U'4');
+    int n4 = 0;
+    for (const page::Page& pg : pages) {
+        for (const dl::Item& item : pg.dl.items) {
+            if (const auto* run = std::get_if<dl::GlyphRun>(&item)) {
+                if (run->size != doctest::Approx(8.0f)) continue;
+                for (const dl::Glyph& g : run->glyphs) if (g.gid == g4) ++n4;
+            }
+        }
+    }
+    CHECK(n4 == 1);
+}

@@ -27,6 +27,8 @@
  */
 namespace typeset::inl {
 
+struct Paragraph;
+
 /// 外部ハンドラで生成するオブジェクトの指定（組版時に obj::ObjectRegistry で解決する）
 struct ObjectRef {
     std::string handler;
@@ -42,6 +44,8 @@ struct InlineRun {
     Size imageSize;         ///< pt。0 なら画素数を 72dpi として使い、片方 0 なら縦横比を保つ
     std::shared_ptr<const obj::ObjectResult> object;    ///< 解決済みのオブジェクト
     std::optional<ObjectRef> objectRef;                 ///< 未解決（FlowLayouter が解決する）
+    /// 脚注。この run が本文中の記号（text は "{fn}"。FlowLayouter が番号に置き換え、段末に注を置く）
+    std::shared_ptr<const Paragraph> footnote;
 };
 
 struct Paragraph {
@@ -87,7 +91,28 @@ struct Paragraph {
         r.object = std::move(object);
         runs.push_back(std::move(r));
     }
+
+    /**
+     * 脚注を足す。本文のこの位置に記号（番号。markerStyle は上付きにしておく: superscriptStyle）が入り、
+     * 注の本文 note は FlowLayouter がその行の載る段の末尾に置く（番号は文書を通して連番）
+     */
+    void addFootnote(Paragraph note, TextStyle markerStyle);
 };
+
+/// 上付き（脚注記号・指数用）: 0.6 倍にして注記側へ 0.6em ずらす
+inline TextStyle superscriptStyle(TextStyle s) {
+    s.size *= 0.6f;
+    s.baselineShift = 0.6f;
+    return s;
+}
+
+inline void Paragraph::addFootnote(Paragraph note, TextStyle markerStyle) {
+    InlineRun r;
+    r.text = u"{fn}";
+    r.style = std::move(markerStyle);
+    r.footnote = std::make_shared<Paragraph>(std::move(note));
+    runs.push_back(std::move(r));
+}
 
 /// オブジェクトの描画命令を物理矩形 box に置く Group を作る（sideways: 時計回り 90° で横倒し）
 dl::Group objectGroup(const obj::ObjectResult& ob, const Rect& box, bool sideways);

@@ -213,6 +213,7 @@ ShapedText shapeText(const std::u16string& text, const std::vector<StyleRun>& ru
             (style.font.italic && desc.slant == glyphware::Slant::Normal);
         const Pt embolden = fakeBold ? dl::fakeBoldWidth(size) : 0.0f;
         const float skew = fakeItalic ? dl::kFakeItalicSkew : 0.0f;
+        const Pt shift = style.baselineShift * size;    // 注記側が正
 
         hb_font_t* hbFont = ctx.fonts.hbFont(*seg.face);
 
@@ -283,6 +284,7 @@ ShapedText shapeText(const std::u16string& text, const std::vector<StyleRun>& ru
                     g.block = baseline - yo * blockScale;
                     adv = pos[k].x_advance * s * advScale;
                 }
+                g.block += vertical ? shift : -shift;
                 g.advance = adv;
                 clusterAdvance += adv;
                 pen += adv;

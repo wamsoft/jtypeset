@@ -144,6 +144,7 @@ PYBIND11_MODULE(typeset, m) {
         .def_readwrite("orientation", &TextStyle::orientation)
         .def_readwrite("scale_x", &TextStyle::scaleX)
         .def_readwrite("scale_y", &TextStyle::scaleY)
+        .def_readwrite("baseline_shift", &TextStyle::baselineShift)
         .def_readwrite("fake_bold", &TextStyle::fakeBold)
         .def_readwrite("fake_italic", &TextStyle::fakeItalic)
         .def_readwrite("language", &TextStyle::language)
@@ -234,6 +235,12 @@ PYBIND11_MODULE(typeset, m) {
              py::arg("handler"), py::arg("source"), py::arg("style"),
              py::arg("params") = std::map<std::string, std::string>{},
              "外部ハンドラのオブジェクト（数式など）を行内に足す。layout(objects=...) の ObjectRegistry で解決される")
+        .def("add_footnote",
+             [](inl::Paragraph& p, inl::Paragraph note, TextStyle markerStyle) {
+                 p.addFootnote(std::move(note), std::move(markerStyle));
+             },
+             py::arg("note"), py::arg("marker_style"),
+             "脚注を足す。本文のこの位置に番号（marker_style は superscript_style() で上付きに）が入り、注は段末に置かれる")
         .def_property_readonly("text", &inl::Paragraph::text);
 
     // ---- ブロック ----
@@ -550,7 +557,8 @@ PYBIND11_MODULE(typeset, m) {
              [](page::FlowLayouter& l, const block::Flow& flow, const page::PageSequence& seq,
                 std::map<std::u16string, std::u16string> fields, bool drawGuides, bool balanceLastPage,
                 std::u16string figureFormat, std::u16string tableFormat, std::u16string equationFormat,
-                obj::ObjectRegistry* objects) {
+                obj::ObjectRegistry* objects, std::u16string footnoteMarkerFormat,
+                std::u16string footnoteLabelFormat) {
                  page::FlowLayoutOptions o;
                  o.fields = std::move(fields);
                  o.drawGuides = drawGuides;
@@ -559,6 +567,8 @@ PYBIND11_MODULE(typeset, m) {
                  o.tableFormat = std::move(tableFormat);
                  o.equationFormat = std::move(equationFormat);
                  o.objects = objects;
+                 o.footnoteMarkerFormat = std::move(footnoteMarkerFormat);
+                 o.footnoteLabelFormat = std::move(footnoteLabelFormat);
                  return l.layout(flow, seq, o);
              },
              py::arg("flow"), py::arg("sequence"),
@@ -568,7 +578,11 @@ PYBIND11_MODULE(typeset, m) {
              py::arg("table_format") = std::u16string(u"表 {n}"),
              py::arg("equation_format") = std::u16string(u"({n})"),
              py::arg("objects") = nullptr,
+             py::arg("footnote_marker_format") = std::u16string(u"{n}"),
+             py::arg("footnote_label_format") = std::u16string(u"{n} "),
              "Flow をページ列へ流し込む。fields は柱・ノンブル・本文の {name} 置換");
+
+    m.def("superscript_style", &inl::superscriptStyle, py::arg("style"), "上付き（脚注記号・指数用）のスタイルを作る");
 
     m.def("save_pdf",
           [](const std::vector<page::Page>& pages, const std::string& path, const std::string& title,

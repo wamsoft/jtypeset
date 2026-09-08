@@ -48,6 +48,9 @@ struct TextStyle {
     bool fakeBold = false;
     bool fakeItalic = false;
 
+    /// ベースラインのずらし（このスタイルの em 単位）。注記側が正（横組み: 上、縦組み: 右）。上付き文字・脚注記号用
+    float baselineShift = 0.0f;
+
     /// BCP47（シェイピングの言語タグ。"ja" で日本語字形が選ばれる）
     std::string language = "ja";
 };
