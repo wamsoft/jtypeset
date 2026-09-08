@@ -1,9 +1,13 @@
 /**
  * flow_layouter.cpp — Flow → ページ列
  *
- * 流し込みは Flower が状態を持って進める。段抜き（spanColumns）が段組ページの途中に来たときは、
- * そのページで段に置いた内容を「ページ先頭の再開点」から段の高さを縮めて組み直し（試行モード）、
- * 段の高さが揃ったところで全幅の帯に段抜きブロックを置き、その下で段を再開する。
+ * 流し込みは Flower が状態を持って進める。
+ *
+ *  - 段抜き（spanColumns）が段組ページの途中に来たときは、そのページで段に置いた内容を
+ *    「ページ先頭の再開点」から段の長さを縮めて組み直し（試行モード）、段の高さが揃ったところで
+ *    全幅の帯に段抜きブロックを置き、その下で段を再開する。最終ページの段揃えも同じ機構
+ *  - 見出しの自動採番・図表番号・相互参照（{ref:ラベル} {page:ラベル}）・目次は 2〜3 パスで解く。
+ *    前のパスで集めた番号とページを次のパスの置換に使う
  */
 
 #include "typeset/page/flow_layouter.hpp"
@@ -19,7 +23,7 @@ namespace {
 
 constexpr float kEps = 0.01f;
 
-/// `{name}` を置換した段落を返す
+/// `{name}` を置換した段落を返す（`{` が無ければコピーだけ）
 inl::Paragraph substitute(const inl::Paragraph& src,
                           const std::map<std::u16string, std::u16string>& fields) {
     inl::Paragraph out = src;
@@ -42,9 +46,18 @@ inl::Paragraph substitute(const inl::Paragraph& src,
     return out;
 }
 
+bool hasPlaceholder(const inl::Paragraph& p) {
+    for (const inl::InlineRun& r : p.runs) {
+        if (r.text.find(u'{') != std::u16string::npos) return true;
+    }
+    return false;
+}
+
 std::u16string toU16(int v) {
     return text::utf8ToUtf16(std::to_string(v));
 }
+
+std::u16string toU16(const std::string& s) { return text::utf8ToUtf16(s); }
 
 const block::BlockStyle* styleOf(const block::Block& blk) {
     if (const auto* p = std::get_if<block::ParagraphBlock>(&blk)) return &p->block;
@@ -54,6 +67,8 @@ const block::BlockStyle* styleOf(const block::Block& blk) {
     if (const auto* l = std::get_if<block::LabeledBlock>(&blk)) return &l->block;
     if (const auto* i = std::get_if<block::ImageBlock>(&blk)) return &i->block;
     if (const auto* t = std::get_if<block::TableBlock>(&blk)) return &t->block;
+    if (const auto* li = std::get_if<block::ListBlock>(&blk)) return &li->block;
+    if (const auto* tc = std::get_if<block::TocBlock>(&blk)) return &tc->block;
     return nullptr;
 }
 
@@ -91,16 +106,45 @@ void trimRegionStart(Region& r, Pt d) {
 }
 
 /**
+ * パス間で受け渡す情報（番号・ページ・見出し一覧）
+ */
+struct RefInfo {
+    std::map<std::u16string, std::u16string> fields;   ///< "ref:label" / "page:label" → 文字列
+    struct Heading {
+        std::u16string title;   ///< 番号込み
+        int level = 1;
+        int page = 0;
+    };
+    std::vector<Heading> headings;
+    int totalPages = 0;
+
+    bool operator==(const RefInfo& o) const {
+        if (fields != o.fields || totalPages != o.totalPages || headings.size() != o.headings.size()) return false;
+        for (size_t i = 0; i < headings.size(); ++i) {
+            if (headings[i].title != o.headings[i].title || headings[i].level != o.headings[i].level ||
+                headings[i].page != o.headings[i].page) return false;
+        }
+        return true;
+    }
+};
+
+/**
  * 流し込みの状態
  */
 class Flower {
 public:
     Flower(font::FontSet& fonts, const block::Flow& flow, const PageSequence& seq,
-           const FlowLayoutOptions& opts)
-        : fonts_(fonts), layouter_(fonts), flow_(flow), seq_(seq), opts_(opts),
-          columns_(seq.master.columns), columnGap_(seq.master.columnGap) {}
+           const FlowLayoutOptions& opts, const RefInfo* prev)
+        : fonts_(fonts), layouter_(fonts), flow_(flow), seq_(seq), opts_(opts), prev_(prev),
+          columns_(seq.master.columns), columnGap_(seq.master.columnGap) {
+        fields_ = opts.fields;
+        if (prev_) {
+            for (const auto& kv : prev_->fields) fields_[kv.first] = kv.second;
+        }
+    }
 
     std::vector<Page> run(int totalPagesHint);
+    const RefInfo& collected() const { return collected_; }
 
 private:
     font::FontSet& fonts_;
@@ -108,6 +152,9 @@ private:
     const block::Flow& flow_;
     const PageSequence& seq_;
     const FlowLayoutOptions& opts_;
+    const RefInfo* prev_;
+    std::map<std::u16string, std::u16string> fields_;
+    RefInfo collected_;
 
     int columns_;
     Pt columnGap_;
@@ -120,6 +167,31 @@ private:
     bool pageHasContent_ = false;
     int totalPagesHint_ = 0;
 
+    // 採番
+    std::vector<int> headingCounters_;
+    int figureCount_ = 0;
+    int tableCount_ = 0;
+
+    /// ブロックを置く前の採番・収集の状態（巻き戻し用）
+    struct NumberingState {
+        std::vector<int> headingCounters;
+        int figureCount = 0;
+        int tableCount = 0;
+        size_t collectedHeadings = 0;
+        std::map<std::u16string, std::u16string> collectedFields;
+    };
+    NumberingState snapshotNumbering() const {
+        return NumberingState{headingCounters_, figureCount_, tableCount_, collected_.headings.size(),
+                              collected_.fields};
+    }
+    void restoreNumbering(const NumberingState& s) {
+        headingCounters_ = s.headingCounters;
+        figureCount_ = s.figureCount;
+        tableCount_ = s.tableCount;
+        collected_.headings.resize(std::min(s.collectedHeadings, collected_.headings.size()));
+        collected_.fields = s.collectedFields;
+    }
+
     /// keepWithNext で保留中のブロック（この段に置いたが、次が入らなければ一緒に移す）
     struct Pending {
         const block::Block* blk = nullptr;
@@ -127,19 +199,23 @@ private:
         size_t regionIndex = 0;
         size_t itemStart = 0;   ///< その段のページ dl に足した位置
         Pt usedBefore = 0.0f;
+        NumberingState numbering;   ///< ブロックを置く前の採番状態
     };
     std::optional<Pending> pending_;
+    size_t blockItemStart_ = 0;     ///< いま置いているブロックの最初の dl 位置
+    NumberingState blockNumbering_; ///< いま置いているブロックの前の採番状態
 
     // --- 段のバランス取り（段抜き）のための再開点 ---
     struct PageStart {
         size_t blockIndex = 0;      ///< このページ（の段）の先頭に来るブロック
-        int paraIndex = 0;          ///< そのブロック内の段落番号（ラベル付き段落の本文）
+        int paraIndex = 0;          ///< そのブロック内の段落番号（ラベル付き段落の本文・箇条書きの項目）
         size_t charStart = 0;       ///< 続きから組む位置
         bool labelPlaced = false;
     };
     PageStart pageStart_;
     size_t pageItemStart_ = 0;              ///< 現ページの dl で、段の内容が始まる位置
     std::vector<Region> pageBaseRegions_;   ///< 現ページの段の初期状態（段抜きの後は下へずれたもの）
+    NumberingState pageNumbering_;          ///< 再開点での採番状態（組み直しで番号が進まないように）
 
     // いま組んでいる位置（newPage() が再開点を記録するのに使う）
     size_t curBlockIndex_ = 0;
@@ -157,6 +233,18 @@ private:
     Region& region() { return regions_[regionIndex_]; }
     bool aborted() const { return trialOverflow_; }
 
+    inl::Paragraph resolved(const inl::Paragraph& p) const {
+        return hasPlaceholder(p) ? substitute(p, fields_) : p;
+    }
+
+    /// 現ページの段に内容が無い（巻き戻しで空になった等）
+    bool pageEmpty() const {
+        if (pages_.empty()) return true;
+        if (pages_.back().dl.items.size() > pageItemStart_) return false;
+        for (const Region& r : regions_) if (r.used > kEps) return false;
+        return true;
+    }
+
     void newPage();
     void finishPage();
     bool nextRegion();          ///< 次の段へ。無ければ新しいページ（試行中はあふれ）
@@ -166,16 +254,20 @@ private:
     void placeContent(const block::Block& blk, const block::BlockStyle& style, const PageStart* resume);
     void placeParagraphs(const std::vector<const inl::Paragraph*>& paras, const block::BlockStyle& style,
                          const inl::Paragraph* label, Pt labelWidth, Pt labelGap, const PageStart* resume);
+    void placeHeading(const block::HeadingBlock& h, const PageStart* resume);
+    void placeList(const block::ListBlock& list, const PageStart* resume);
+    void placeToc(const block::TocBlock& toc, const PageStart* resume);
     void placeRule(const block::RuleBlock& r);
     void placeImage(const block::ImageBlock& img);
     void placeTable(const block::TableBlock& table);
     void placeSpanning(const block::Block& blk, const block::BlockStyle& style);
-    void balanceColumnsBefore(size_t spanBlockIndex);
+    void balanceColumns(size_t endBlock);
     void replayPage(const PageStart& start, size_t endBlock);
     void drawGuides();
     void applyBreakBefore(const block::BlockStyle& style);
     void applySpaceBefore(Pt space);
     void applySpaceAfter(Pt space);
+    void recordLabel(const std::string& label, const std::u16string& number);
 
     /// 段落 1 つを現在の段以降に流す。ラベル付きなら本文の行長を縮める
     void flowParagraph(const inl::Paragraph& para, const block::BlockStyle& style,
@@ -184,11 +276,13 @@ private:
     int linesThatFit(Pt pitch) const;
     void layoutRunning(const RunningText& rt, bool top);
 
-    /// 論理座標の矩形を塗る（罫線用）
-    void fillLogicalRect(Pt inline0, Pt inline1, Pt block0, Pt block1, Color color);
+    /// 論理座標の矩形を塗る（罫線・背景用）。index を渡すとその位置へ挿入（背景を後ろへ）
+    void fillLogicalRect(Pt inline0, Pt inline1, Pt block0, Pt block1, Color color,
+                         std::optional<size_t> insertAt = std::nullopt);
     /// 段落を指定の行長・位置で全部組んで置く（表のセル・キャプション用）。消費した行送り方向の量を返す
     Pt placeParagraphAt(const inl::Paragraph& para, Pt blockOffset, Pt inlineOffset, Pt lineLength,
-                        std::optional<Align> alignOverride = std::nullopt);
+                        std::optional<Align> alignOverride = std::nullopt,
+                        inl::ParagraphFragment* fragOut = nullptr);
     /// 段落を組んだときの行送り方向の量（置かない）
     Pt measureParagraph(const inl::Paragraph& para, Pt lineLength, Pt* naturalMax = nullptr);
 };
@@ -219,6 +313,7 @@ void Flower::newPage() {
     pageBaseRegions_ = regions_;
     pageItemStart_ = 0;
     pageStart_ = PageStart{curBlockIndex_, curParaIndex_, curCharStart_, curLabelPlaced_};
+    pageNumbering_ = snapshotNumbering();
 }
 
 void Flower::finishPage() {
@@ -258,7 +353,7 @@ void Flower::drawGuides() {
 }
 
 void Flower::layoutRunning(const RunningText& rt, bool top) {
-    std::map<std::u16string, std::u16string> fields = opts_.fields;
+    std::map<std::u16string, std::u16string> fields = fields_;
     fields[u"page"] = toU16(page().number);
     fields[u"pages"] = toU16(std::max(totalPagesHint_, static_cast<int>(pages_.size())));
     const inl::Paragraph para = substitute(rt.para, fields);
@@ -273,6 +368,12 @@ void Flower::layoutRunning(const RunningText& rt, bool top) {
     if (frag.lines.empty()) return;
     const Pt y = top ? body.y - rt.offset : body.bottom() + rt.offset;
     inl::emitParagraph(page().dl, frag, WritingMode::HorizontalTb, Point{body.x, y});
+}
+
+void Flower::recordLabel(const std::string& label, const std::u16string& number) {
+    if (label.empty()) return;
+    collected_.fields[u"ref:" + toU16(label)] = number;
+    collected_.fields[u"page:" + toU16(label)] = toU16(page().number);
 }
 
 //------------------------------------------------------------------------------
@@ -307,15 +408,21 @@ int Flower::linesThatFit(Pt pitch) const {
     return static_cast<int>(std::floor((r.remaining() + kEps) / pitch));
 }
 
-void Flower::fillLogicalRect(Pt inline0, Pt inline1, Pt block0, Pt block1, Color color) {
+void Flower::fillLogicalRect(Pt inline0, Pt inline1, Pt block0, Pt block1, Color color,
+                             std::optional<size_t> insertAt) {
     const Rect r = region().toRect(inline0, inline1, block0, block1);
     if (r.w <= 0.0f || r.h <= 0.0f) return;
-    page().dl.addRect(r, color);
+    if (insertAt && *insertAt <= page().dl.items.size()) {
+        page().dl.items.insert(page().dl.items.begin() + static_cast<ptrdiff_t>(*insertAt),
+                               dl::RectItem{r, color});
+    } else {
+        page().dl.addRect(r, color);
+    }
 }
 
 Pt Flower::measureParagraph(const inl::Paragraph& para, Pt lineLength, Pt* naturalMax) {
     const inl::ConstantLineShape shape(std::max(1.0f, lineLength));
-    const inl::ParagraphFragment frag = layouter_.layout(para, wm(), shape);
+    const inl::ParagraphFragment frag = layouter_.layout(resolved(para), wm(), shape);
     if (naturalMax) {
         Pt m = 0.0f;
         for (const inl::LineBox& l : frag.lines) m = std::max(m, l.naturalLength + l.indent);
@@ -325,11 +432,13 @@ Pt Flower::measureParagraph(const inl::Paragraph& para, Pt lineLength, Pt* natur
 }
 
 Pt Flower::placeParagraphAt(const inl::Paragraph& para, Pt blockOffset, Pt inlineOffset,
-                            Pt lineLength, std::optional<Align> alignOverride) {
-    inl::Paragraph p = para;
+                            Pt lineLength, std::optional<Align> alignOverride,
+                            inl::ParagraphFragment* fragOut) {
+    inl::Paragraph p = resolved(para);
     if (alignOverride) p.style.align = *alignOverride;
     const inl::ConstantLineShape shape(std::max(1.0f, lineLength));
     const inl::ParagraphFragment frag = layouter_.layout(p, wm(), shape);
+    if (fragOut) *fragOut = frag;
     if (frag.lines.empty()) return 0.0f;
     const Point origin = region().lineOrigin(blockOffset, frag.linePitch, inlineOffset);
     inl::emitParagraph(page().dl, frag, wm(), origin);
@@ -351,16 +460,29 @@ void Flower::placeBlock(const block::Block& blk, const PageStart* resume) {
         if (sec->columns) pendingColumns_ = *sec->columns;
         if (sec->columnGap) pendingGap_ = *sec->columnGap;
         ensureRegion();
-        if (trial_) {
-            if (pageHasContent_) trialOverflow_ = true;
-            return;
-        }
+        if (trial_) return;   // 組み直し中: 段数はこのページで既に効いている
         if (pageHasContent_) {
-            // 段数の変更はページ単位。内容があれば改ページする
-            finishPage();
+            // 段数の変更はページ単位。内容があれば改ページする。直前が keepWithNext の見出しなら
+            // 巻き取って新しいページの先頭に置き直す
+            std::optional<Pending> carry;
+            if (pending_ && pending_->blk && pending_->regionIndex == regionIndex_) {
+                carry = *pending_;
+                pending_.reset();
+                page().dl.items.resize(carry->itemStart);
+                region().used = carry->usedBefore;
+                restoreNumbering(carry->numbering);
+            }
+            const size_t myBlock = curBlockIndex_;
+            if (carry) curBlockIndex_ = carry->blockIndex;   // 新しいページの再開点は巻き取った見出し
+            if (pageEmpty()) {
+                pages_.pop_back();   // 見出しだけだったページは作り直す（空ページを残さない）
+            } else {
+                finishPage();
+            }
             newPage();
+            if (carry) placeBlock(*carry->blk);
+            curBlockIndex_ = myBlock;
         } else {
-            // まだ何も置いていなければ今のページから効かせる
             pages_.pop_back();
             newPage();
         }
@@ -374,6 +496,9 @@ void Flower::placeBlock(const block::Block& blk, const PageStart* resume) {
         applyBreakBefore(*style);
         if (aborted()) return;
     }
+    ensureRegion();
+    blockItemStart_ = page().dl.items.size();
+    blockNumbering_ = snapshotNumbering();
 
     if (style->spanColumns && columns_ > 1 && !resume) {
         placeSpanning(blk, *style);
@@ -407,7 +532,7 @@ void Flower::placeContent(const block::Block& blk, const block::BlockStyle& styl
     if (const auto* p = std::get_if<block::ParagraphBlock>(&blk)) {
         placeParagraphs({&p->para}, style, nullptr, 0.0f, 0.0f, resume);
     } else if (const auto* h = std::get_if<block::HeadingBlock>(&blk)) {
-        placeParagraphs({&h->para}, style, nullptr, 0.0f, 0.0f, resume);
+        placeHeading(*h, resume);
     } else if (const auto* l = std::get_if<block::LabeledBlock>(&blk)) {
         std::vector<const inl::Paragraph*> paras;
         for (const inl::Paragraph& b : l->body) paras.push_back(&b);
@@ -422,11 +547,194 @@ void Flower::placeContent(const block::Block& blk, const block::BlockStyle& styl
         placeImage(*img);
     } else if (const auto* t = std::get_if<block::TableBlock>(&blk)) {
         placeTable(*t);
+    } else if (const auto* li = std::get_if<block::ListBlock>(&blk)) {
+        placeList(*li, resume);
+    } else if (const auto* tc = std::get_if<block::TocBlock>(&blk)) {
+        placeToc(*tc, resume);
     }
 }
 
 //------------------------------------------------------------------------------
-// 段抜き（spanColumns）
+// 見出し（採番・しおり・目次の収集）
+//------------------------------------------------------------------------------
+
+void Flower::placeHeading(const block::HeadingBlock& h, const PageStart* resume) {
+    inl::Paragraph para = resolved(h.para);
+    std::u16string number;
+    if (h.numbered && !resume) {
+        const size_t level = static_cast<size_t>(std::max(1, h.level));
+        if (headingCounters_.size() < level) headingCounters_.resize(level, 0);
+        headingCounters_[level - 1] += 1;
+        headingCounters_.resize(level);   // 下のレベルをリセット
+        for (size_t i = 0; i < level; ++i) {
+            if (i) number += u".";
+            number += toU16(headingCounters_[i]);
+        }
+        std::u16string prefix = number;
+        if (level == 1) prefix += u".";
+        prefix += opts_.headingNumberSeparator;
+        if (!para.runs.empty()) para.runs.front().text = prefix + para.runs.front().text;
+        else para.runs.push_back(inl::InlineRun{prefix, h.para.baseStyle()});
+    } else if (h.numbered && resume) {
+        // 続き（段またぎ）は番号を振り直さず、前に付けた番号を再現する
+        const size_t level = static_cast<size_t>(std::max(1, h.level));
+        for (size_t i = 0; i < level && i < headingCounters_.size(); ++i) {
+            if (i) number += u".";
+            number += toU16(headingCounters_[i]);
+        }
+        std::u16string prefix = number + (level == 1 ? u"." : u"") + opts_.headingNumberSeparator;
+        if (!para.runs.empty()) para.runs.front().text = prefix + para.runs.front().text;
+    }
+
+    // 置く前の位置を控える（しおり・目次のページはここで決まる。ただし段が変わったら置いた後で直す）
+    const size_t pagesBefore = pages_.size();
+    placeParagraphs({&para}, h.block, nullptr, 0.0f, 0.0f, resume);
+    if (aborted()) return;
+
+    if (!resume) {
+        // 見出しの先頭の位置: 直前に置いたグリフ列の最初の位置から
+        Point pos{region().area.x, region().area.y};
+        for (size_t i = blockItemStart_; i < page().dl.items.size(); ++i) {
+            if (const auto* run = std::get_if<dl::GlyphRun>(&page().dl.items[i])) {
+                if (!run->glyphs.empty()) { pos = run->glyphs.front().pos; break; }
+            }
+        }
+        if (pages_.size() != pagesBefore) {
+            // 見出しが次のページへ移った場合、dl は新しいページのものなので blockItemStart_ は使えない
+            for (const dl::Item& item : page().dl.items) {
+                if (const auto* run = std::get_if<dl::GlyphRun>(&item)) {
+                    if (!run->glyphs.empty()) { pos = run->glyphs.front().pos; break; }
+                }
+            }
+        }
+        if (h.bookmark && !trial_) {
+            dl::Bookmark bm;
+            bm.title = para.text();
+            bm.level = h.level;
+            bm.pos = pos;
+            // 見出しのグリフの前に入れる（keepWithNext の巻き取りで一緒に消えるように）
+            const size_t at = std::min(blockItemStart_, page().dl.items.size());
+            page().dl.items.insert(page().dl.items.begin() + static_cast<ptrdiff_t>(at), bm);
+            if (pending_ && pending_->itemStart >= at) pending_->itemStart += 1;
+        }
+        if (!trial_) {
+            collected_.headings.push_back(RefInfo::Heading{para.text(), h.level, page().number});
+            recordLabel(h.block.label, number.empty() ? para.text() : number);
+        }
+    }
+}
+
+//------------------------------------------------------------------------------
+// 箇条書き
+//------------------------------------------------------------------------------
+
+void Flower::placeList(const block::ListBlock& list, const PageStart* resume) {
+    if (list.items.empty()) return;
+    ensureRegion();
+    if (!resume) applySpaceBefore(list.block.spaceBefore);
+    const int start = resume ? resume->paraIndex : 0;
+    for (int i = start; i < static_cast<int>(list.items.size()); ++i) {
+        const inl::Paragraph& item = list.items[i];
+        const Pt em = item.baseStyle().size;
+        const Pt labelWidth = list.labelWidth > 0.0f ? list.labelWidth : em * 1.5f;
+        std::u16string marker = list.marker == block::ListBlock::Marker::Bullet
+                                    ? list.bullet
+                                    : toU16(i + 1) + list.numberSuffix;
+        inl::Paragraph label = inl::Paragraph::plain(marker, item.baseStyle());
+        label.style.align = Align::Start;
+        label.style.firstLineIndent = 0.0f;
+
+        block::BlockStyle st = list.block;
+        st.spaceBefore = (i == 0) ? 0.0f : list.itemGap;
+        st.spaceAfter = 0.0f;
+        st.keepWithNext = false;
+        st.background.reset();
+        st.padding = 0.0f;
+
+        curParaIndex_ = i;
+        const bool resumed = resume && i == start;
+        if (!resumed && i > 0) applySpaceBefore(list.itemGap);
+        flowParagraph(item, st, &label, labelWidth, list.gap, false,
+                      resumed ? resume->charStart : 0, resumed ? resume->labelPlaced : false);
+        if (aborted()) return;
+    }
+    applySpaceAfter(list.block.spaceAfter);
+    pending_.reset();
+}
+
+//------------------------------------------------------------------------------
+// 目次
+//------------------------------------------------------------------------------
+
+void Flower::placeToc(const block::TocBlock& toc, const PageStart* resume) {
+    ensureRegion();
+    if (!prev_) return;   // 最初のパスでは見出しがまだ分からない
+    if (!resume) applySpaceBefore(toc.block.spaceBefore);
+
+    const TextStyle& st1 = toc.style;
+    const TextStyle& st2 = toc.subStyle ? *toc.subStyle : toc.style;
+    const Pt indentUnit = toc.indentPerLevel > 0.0f ? toc.indentPerLevel : st1.size;
+
+    // ページ番号の幅（3 桁分）
+    inl::Paragraph probe = inl::Paragraph::plain(u"000", st1);
+    Pt numberWidth = 0.0f;
+    measureParagraph(probe, 1.0e6f, &numberWidth);
+    const Pt gap = st1.size;
+
+    const int start = resume ? resume->paraIndex : 0;
+    for (int i = start; i < static_cast<int>(prev_->headings.size()); ++i) {
+        const RefInfo::Heading& e = prev_->headings[i];
+        if (e.level > toc.maxLevel) continue;
+        curParaIndex_ = i;
+        curCharStart_ = 0;
+
+        const TextStyle& st = (e.level <= 1) ? st1 : st2;
+        const Pt indent = indentUnit * static_cast<float>(std::max(0, e.level - 1));
+        inl::Paragraph title = inl::Paragraph::plain(e.title, st);
+        title.style.align = Align::Start;
+        title.style.firstLineIndent = 0.0f;
+        title.style.lineHeight = toc.lineHeight;
+        const Pt L = region().lineLength();
+        const Pt titleLen = std::max(1.0f, L - indent - numberWidth - gap);
+        const Pt need = measureParagraph(title, titleLen);
+        if (region().remaining() + kEps < need && !region().fresh()) {
+            nextRegion();
+            if (aborted()) return;
+        }
+        Region& reg = region();
+        inl::ParagraphFragment frag;
+        const Pt used = placeParagraphAt(title, 0.0f, indent, titleLen, std::nullopt, &frag);
+        if (frag.lines.empty()) continue;
+        const Pt pitch = frag.linePitch;
+        const Pt lastLineOffset = pitch * static_cast<float>(frag.lines.size() - 1);
+
+        // ページ番号は最後の行の右端
+        inl::Paragraph num = inl::Paragraph::plain(toU16(e.page), st);
+        num.style.align = Align::End;
+        num.style.firstLineIndent = 0.0f;
+        num.style.lineHeight = toc.lineHeight;
+        placeParagraphAt(num, lastLineOffset, 0.0f, L);
+
+        // 点線: 見出しの最後の行の末尾からページ番号の手前まで
+        if (toc.leader) {
+            const inl::LineBox& last = frag.lines.back();
+            const Pt from = indent + last.indent + last.naturalLength + st.size * 0.5f;
+            const Pt to = L - numberWidth - st.size * 0.3f;
+            const Pt dot = 0.9f;
+            const Pt center = reg.used + lastLineOffset + pitch * 0.5f + st.size * 0.3f;
+            for (Pt x = from; x + dot <= to; x += 3.0f) {
+                fillLogicalRect(x, x + dot, center - dot * 0.5f, center + dot * 0.5f, st.fill);
+            }
+        }
+        reg.used += used;
+        pageHasContent_ = true;
+    }
+    applySpaceAfter(toc.block.spaceAfter);
+    pending_.reset();
+}
+
+//------------------------------------------------------------------------------
+// 段抜き（spanColumns）と段のバランス取り
 //------------------------------------------------------------------------------
 
 void Flower::replayPage(const PageStart& start, size_t endBlock) {
@@ -444,16 +752,16 @@ void Flower::replayPage(const PageStart& start, size_t endBlock) {
 }
 
 /**
- * 段抜きブロックの前で、このページの段の内容の高さを揃える
+ * このページの段の内容の高さを揃える（endBlock の前まで）
  *
  * ページ先頭の再開点から、段の長さを H に縮めて組み直す。入らなければ H を増やして繰り返す。
  * 元の長さで入っていた内容なので H = 元の長さ で必ず収まる。
  */
-void Flower::balanceColumnsBefore(size_t spanBlockIndex) {
+void Flower::balanceColumns(size_t endBlock) {
     const PageStart start = pageStart_;
     const size_t itemStart = pageItemStart_;
     const std::vector<Region> base = pageBaseRegions_;
-    if (base.empty()) return;
+    if (base.size() < 2) return;
     const Pt fullExtent = base[0].blockExtent();
     const int ncol = static_cast<int>(base.size());
 
@@ -461,11 +769,12 @@ void Flower::balanceColumnsBefore(size_t spanBlockIndex) {
     for (const Region& r : regions_) total += r.used;
     Pt H = std::min(fullExtent, total / static_cast<float>(ncol));
 
-    // 再開点の状態を保存しておく（replay が cursor を動かす）
     const size_t savedBlock = curBlockIndex_;
     const int savedPara = curParaIndex_;
     const size_t savedChar = curCharStart_;
     const bool savedLabel = curLabelPlaced_;
+    // 再組みで採番が進まないように、再開点の採番状態から組み直す
+    const NumberingState startNumbering = pageNumbering_;
 
     for (int iter = 0; iter < 40; ++iter) {
         page().dl.items.resize(itemStart);
@@ -474,14 +783,14 @@ void Flower::balanceColumnsBefore(size_t spanBlockIndex) {
         regionIndex_ = 0;
         pending_.reset();
         pageHasContent_ = itemStart > 0;
+        restoreNumbering(startNumbering);
 
         trial_ = true;
         trialOverflow_ = false;
-        replayPage(start, spanBlockIndex);
+        replayPage(start, endBlock);
         trial_ = false;
 
         if (!trialOverflow_ || H >= fullExtent - kEps) break;
-        // 少しずつ伸ばす（行送り 1 本分程度）
         H = std::min(fullExtent, H + std::max(fullExtent * 0.03f, 6.0f));
     }
     trialOverflow_ = false;
@@ -495,18 +804,16 @@ void Flower::balanceColumnsBefore(size_t spanBlockIndex) {
 void Flower::placeSpanning(const block::Block& blk, const block::BlockStyle& style) {
     ensureRegion();
     if (trial_) {
-        // 試行中の段抜きは扱えない（ページに内容があればあふれ扱い）
         if (pageHasContent_) trialOverflow_ = true;
         return;
     }
 
     Pt top = 0.0f;   // 段の内容が終わる位置（段の始端から）
     if (pageHasContent_) {
-        balanceColumnsBefore(curBlockIndex_);
+        balanceColumns(curBlockIndex_);
         for (const Region& r : regions_) top = std::max(top, r.used);
     }
 
-    // 全幅の帯: 段の始端から top だけ下がった位置から、版面の終端まで
     const Rect body = master().bodyRect(page().number);
     const Rect base = pageBaseRegions_.empty() ? body : pageBaseRegions_[0].area;
     Region band;
@@ -528,7 +835,6 @@ void Flower::placeSpanning(const block::Block& blk, const block::BlockStyle& sty
     regionIndex_ = 0;
     if (pageHasContent_ && style.spaceBefore > 0.0f) regions_[0].used += style.spaceBefore;
 
-    // 帯に入らないなら改ページして先頭に置く
     Pt need = 0.0f;
     if (const auto* p = std::get_if<block::ParagraphBlock>(&blk)) need = measureParagraph(p->para, band.lineLength());
     else if (const auto* h = std::get_if<block::HeadingBlock>(&blk)) need = measureParagraph(h->para, band.lineLength());
@@ -540,10 +846,10 @@ void Flower::placeSpanning(const block::Block& blk, const block::BlockStyle& sty
         return;
     }
 
+    blockItemStart_ = page().dl.items.size();
     placeContent(blk, style, nullptr);
     const Pt consumed = regions_[0].used + style.spaceAfter;
 
-    // 段を帯の下から再開する
     regions_ = savedCols;
     for (Region& reg : regions_) {
         trimRegionStart(reg, top + consumed);
@@ -557,6 +863,7 @@ void Flower::placeSpanning(const block::Block& blk, const block::BlockStyle& sty
     pageBaseRegions_ = regions_;
     pageItemStart_ = page().dl.items.size();
     pageStart_ = PageStart{curBlockIndex_ + 1, 0, 0, false};
+    pageNumbering_ = snapshotNumbering();
 }
 
 //------------------------------------------------------------------------------
@@ -587,7 +894,6 @@ void Flower::placeImage(const block::ImageBlock& img) {
     ensureRegion();
     applySpaceBefore(img.block.spaceBefore);
 
-    // 物理サイズを決める
     const float pw = static_cast<float>(img.image->width);
     const float ph = static_cast<float>(img.image->height);
     Pt w = img.size.w, h = img.size.h;
@@ -598,8 +904,6 @@ void Flower::placeImage(const block::ImageBlock& img) {
     const bool vertical = isVertical(wm());
     auto inlineExtent = [&]() { return vertical ? h : w; };
     auto blockExtent = [&]() { return vertical ? w : h; };
-
-    // 段に収まるよう縮める
     {
         const Region& reg = region();
         const float s = std::min(1.0f, std::min(reg.lineLength() / std::max(1.0f, inlineExtent()),
@@ -607,11 +911,19 @@ void Flower::placeImage(const block::ImageBlock& img) {
         if (s < 1.0f) { w *= s; h *= s; }
     }
 
-    // キャプションの高さ
-    Pt captionExtent = 0.0f;
+    // 図番号
+    std::optional<inl::Paragraph> caption;
+    std::u16string number;
     if (img.caption) {
-        captionExtent = img.captionGap + measureParagraph(*img.caption, inlineExtent());
+        ++figureCount_;
+        number = toU16(figureCount_);
+        std::map<std::u16string, std::u16string> f = fields_;
+        f[u"fig"] = substitute(inl::Paragraph::plain(opts_.figureFormat, TextStyle{}), {{u"n", number}}).text();
+        caption = substitute(*img.caption, f);
     }
+
+    Pt captionExtent = 0.0f;
+    if (caption) captionExtent = img.captionGap + measureParagraph(*caption, inlineExtent());
     const Pt total = blockExtent() + captionExtent;
 
     if (region().remaining() + kEps < total && !region().fresh()) {
@@ -632,7 +944,6 @@ void Flower::placeImage(const block::ImageBlock& img) {
     }
     in0 = std::max(0.0f, in0);
 
-    // 画像本体
     const Rect rect = reg.toRect(in0, in0 + inlineExtent(), reg.used, reg.used + blockExtent());
     dl::ImageItem item;
     item.image = img.image;
@@ -640,12 +951,12 @@ void Flower::placeImage(const block::ImageBlock& img) {
                           Matrix::scaling(rect.w / pw, rect.h / ph));
     page().dl.add(item);
 
-    // キャプション
-    if (img.caption) {
-        placeParagraphAt(*img.caption, blockExtent() + img.captionGap, in0, inlineExtent(),
-                         img.caption->style.align == Align::Justify ? std::optional<Align>(Align::Center)
-                                                                    : std::nullopt);
+    if (caption) {
+        placeParagraphAt(*caption, blockExtent() + img.captionGap, in0, inlineExtent(),
+                         caption->style.align == Align::Justify ? std::optional<Align>(Align::Center)
+                                                                : std::nullopt);
     }
+    if (!trial_) recordLabel(img.block.label, number);
 
     pageHasContent_ = true;
     pending_.reset();
@@ -654,7 +965,6 @@ void Flower::placeImage(const block::ImageBlock& img) {
         reg.used += total;
         applySpaceAfter(img.block.spaceAfter);
     } else {
-        // 回り込み: 本文との間隔ぶん広げた排除領域を登録し、行送りは進めない
         const Pt exIn0 = (img.placement == block::ImagePlacement::FloatEnd) ? in0 - img.gap : in0;
         const Pt exIn1 = (img.placement == block::ImagePlacement::FloatStart) ? in0 + inlineExtent() + img.gap
                                                                               : in0 + inlineExtent();
@@ -681,10 +991,9 @@ void Flower::placeTable(const block::TableBlock& table) {
         Pt height = 0.0f;
     };
     std::vector<GCell> cells;
-    std::vector<std::vector<int>> owner(nrow);   // owner[r][c] = cells のインデックス（-1 = 空）
+    std::vector<std::vector<int>> owner(nrow);
     size_t ncol = table.columns.size();
     {
-        // 列数を先に決める（rowspan で下の行に食い込むぶんも数える）
         std::vector<std::vector<int>> occ(nrow);
         for (size_t r = 0; r < nrow; ++r) {
             size_t c = 0;
@@ -727,17 +1036,15 @@ void Flower::placeTable(const block::TableBlock& table) {
     const Pt pad = table.cellPadding;
     const Pt L = region().lineLength();
 
-    // --- 列幅: 固定はそのまま、自動は内容の自然幅から（1 列のセルだけ見る） ---
-    std::vector<Pt> widths(ncol, 0.0f);
-    std::vector<Pt> natural(ncol, 0.0f);
-    std::vector<Pt> minimum(ncol, 0.0f);
+    // --- 列幅 ---
+    std::vector<Pt> widths(ncol, 0.0f), natural(ncol, 0.0f), minimum(ncol, 0.0f);
     for (const GCell& g : cells) {
         if (g.colspan != 1 || columns[g.col].width > 0.0f) continue;
         Pt nat = 0.0f, mn = 0.0f;
         for (const inl::Paragraph& p : g.cell->paras) {
             Pt a = 0.0f, b2 = 0.0f;
             measureParagraph(p, 1.0e6f, &a);
-            measureParagraph(p, 1.0f, &b2);   // 1pt で組むと 1 行が 1 つの割れない塊になる
+            measureParagraph(p, 1.0f, &b2);
             nat = std::max(nat, a);
             mn = std::max(mn, b2);
         }
@@ -786,7 +1093,7 @@ void Flower::placeTable(const block::TableBlock& table) {
     std::vector<Pt> colStart(ncol + 1, tableStart);
     for (size_t i = 0; i < ncol; ++i) colStart[i + 1] = colStart[i] + widths[i];
 
-    // --- 行の高さ: rowspan 1 のセルで決め、rowspan のセルが足りなければ最後の行を伸ばす ---
+    // --- 行の高さ ---
     std::vector<Pt> rowH(nrow, 0.0f);
     for (GCell& g : cells) {
         const Pt cellWidth = colStart[g.col + g.colspan] - colStart[g.col] - 2.0f * pad;
@@ -802,7 +1109,7 @@ void Flower::placeTable(const block::TableBlock& table) {
         if (sum < g.height) rowH[g.row + g.rowspan - 1] += g.height - sum;
     }
 
-    // --- 行のグループ（rowspan でつながる行は一緒に置く） ---
+    // --- 行のグループ ---
     std::vector<size_t> groupEnd(nrow, 0);
     for (size_t r = 0; r < nrow; ++r) groupEnd[r] = r;
     for (const GCell& g : cells) {
@@ -811,7 +1118,6 @@ void Flower::placeTable(const block::TableBlock& table) {
         }
     }
 
-    // ヘッダ行（先頭の連続したヘッダ行を繰り返す）
     size_t headerCount = 0;
     while (headerCount < nrow && table.rows[headerCount].header) ++headerCount;
 
@@ -819,7 +1125,6 @@ void Flower::placeTable(const block::TableBlock& table) {
     const Pt tableLeft = colStart.front() - b.outer * 0.5f;
     const Pt tableRight = colStart.back() + b.outer * 0.5f;
 
-    // 行 r の上の横罫: 上のセルと違うところだけ引く（rowspan の内部は引かない）
     auto hRuleAbove = [&](size_t r, Pt blockPos, Pt thickness, bool wholeWidth) {
         if (!b.horizontal || thickness <= 0.0f) return;
         if (wholeWidth) {
@@ -838,7 +1143,6 @@ void Flower::placeTable(const block::TableBlock& table) {
             c = e;
         }
     };
-    // 行 r の縦罫: 左右のセルが違う境だけ
     auto vRules = [&](size_t r, Pt block0, Pt block1) {
         if (!b.vertical) return;
         for (size_t c = 0; c <= ncol; ++c) {
@@ -846,6 +1150,19 @@ void Flower::placeTable(const block::TableBlock& table) {
             if (!edge && owner[r][c - 1] == owner[r][c]) continue;
             const Pt t = edge ? b.outer : b.inner;
             fillLogicalRect(colStart[c] - t * 0.5f, colStart[c] + t * 0.5f, block0, block1, b.color);
+        }
+    };
+    auto bottomRule = [&]() {
+        if (!b.horizontal) return;
+        fillLogicalRect(tableLeft, tableRight, region().used - b.outer * 0.5f,
+                        region().used + b.outer * 0.5f, b.color);
+    };
+    auto valignOffset = [&](const GCell& g, Pt spanExtent) -> Pt {
+        const Pt slack = std::max(0.0f, spanExtent - g.height);
+        switch (g.cell->valign) {
+        case block::VAlign::Middle: return slack * 0.5f;
+        case block::VAlign::Bottom: return slack;
+        default: return 0.0f;
         }
     };
 
@@ -861,11 +1178,12 @@ void Flower::placeTable(const block::TableBlock& table) {
         for (size_t r = r0; r <= r1; ++r) {
             const Pt thickness = (r == r0) ? ruleAbove : b.inner;
             hRuleAbove(r, top, thickness, r == r0 && first);
-            // この行から始まるセル
             for (const GCell& g : cells) {
                 if (g.row != r) continue;
+                Pt spanExtent = 0.0f;
+                for (int dr = 0; dr < g.rowspan; ++dr) spanExtent += rowH[r + dr];
                 const Pt cellWidth = colStart[g.col + g.colspan] - colStart[g.col] - 2.0f * pad;
-                Pt off = pad;
+                Pt off = pad + valignOffset(g, spanExtent);
                 for (const inl::Paragraph& p : g.cell->paras) {
                     off += placeParagraphAt(p, top - reg.used + off, colStart[g.col] + pad, cellWidth,
                                             columns[g.col].align == Align::Start
@@ -881,16 +1199,123 @@ void Flower::placeTable(const block::TableBlock& table) {
         return true;
     };
 
+    // 段より高い 1 行を、段の境で分けながら置く（rowspan の無い行だけ）
+    auto placeSplitRow = [&](size_t r, bool first, bool afterHeader) {
+        struct Cursor { int para = 0; size_t charStart = 0; bool done = false; };
+        std::vector<Cursor> cursors(cells.size());
+        for (size_t i = 0; i < cells.size(); ++i) cursors[i].done = (cells[i].row != r);
+        bool firstSeg = true;
+        for (int guard = 0; guard < 1000; ++guard) {
+            Region& reg = region();
+            const Pt ruleAbove = firstSeg ? (first ? b.outer : (afterHeader ? b.headerRule : b.inner)) : 0.0f;
+            const Pt top = reg.used;
+            const Pt avail = reg.remaining() - ruleAbove - 2.0f * pad;
+            if (avail <= 0.0f && !reg.fresh()) {
+                nextRegion();
+                if (aborted()) return;
+                continue;
+            }
+            if (firstSeg) hRuleAbove(r, top, ruleAbove, first);
+            Pt segExtent = 0.0f;
+            bool remaining = false;
+            for (size_t i = 0; i < cells.size(); ++i) {
+                const GCell& g = cells[i];
+                if (cursors[i].done) continue;
+                const Pt cellWidth = colStart[g.col + g.colspan] - colStart[g.col] - 2.0f * pad;
+                Pt off = pad;
+                while (cursors[i].para < static_cast<int>(g.cell->paras.size())) {
+                    const inl::Paragraph p = resolved(g.cell->paras[cursors[i].para]);
+                    const Pt pitch = p.style.resolvedLinePitch(p.baseStyle().size);
+                    const int fit = static_cast<int>(std::floor((avail - off + pad + kEps) / pitch));
+                    if (fit <= 0) break;
+                    const inl::ConstantLineShape shape(std::max(1.0f, cellWidth));
+                    const inl::ParagraphFragment frag =
+                        layouter_.layout(p, wm(), shape, cursors[i].charStart, fit);
+                    if (frag.lines.empty()) break;
+                    const Point origin = reg.lineOrigin(off, pitch, colStart[g.col] + pad);
+                    inl::emitParagraph(page().dl, frag, wm(), origin);
+                    off += pitch * static_cast<float>(frag.lines.size());
+                    if (frag.complete) {
+                        cursors[i].para += 1;
+                        cursors[i].charStart = 0;
+                    } else {
+                        cursors[i].charStart = frag.charEnd;
+                        break;
+                    }
+                }
+                if (cursors[i].para >= static_cast<int>(g.cell->paras.size())) cursors[i].done = true;
+                else remaining = true;
+                segExtent = std::max(segExtent, off + pad);
+            }
+            if (remaining) segExtent = std::max(segExtent, avail + 2.0f * pad);
+            vRules(r, top, top + segExtent);
+            reg.used = top + segExtent;
+            pageHasContent_ = true;
+            firstSeg = false;
+            if (!remaining) return;
+            bottomRule();
+            nextRegion();
+            if (aborted()) return;
+            if (table.repeatHeader && headerCount > 0 && r >= headerCount) {
+                placeRows(0, headerCount - 1, true, false, true);
+            }
+        }
+    };
+
+    // --- キャプション（表の上） ---
+    std::optional<inl::Paragraph> caption;
+    std::u16string number;
+    if (table.caption) {
+        ++tableCount_;
+        number = toU16(tableCount_);
+        std::map<std::u16string, std::u16string> f = fields_;
+        f[u"table"] = substitute(inl::Paragraph::plain(opts_.tableFormat, TextStyle{}), {{u"n", number}}).text();
+        caption = substitute(*table.caption, f);
+    }
+    {
+        // キャプション＋ヘッダ行＋最初の本文の塊が入らなければ、先に次の段へ（ヘッダだけが段末に残らないように）
+        Pt need = 0.0f;
+        if (caption) need += measureParagraph(*caption, L) + table.captionGap;
+        const size_t firstBody = std::min(headerCount, nrow - 1);
+        const size_t g1 = std::max(groupEnd[firstBody], firstBody);
+        for (size_t r = 0; r <= g1; ++r) need += rowH[r];
+        need += b.outer;
+        if (region().remaining() + kEps < need && !region().fresh() && need <= region().blockExtent()) {
+            nextRegion();
+            if (aborted()) return;
+        }
+        if (caption) {
+            region().used += placeParagraphAt(*caption, 0.0f, 0.0f, L) + table.captionGap;
+        }
+        if (!trial_) recordLabel(table.block.label, number);
+    }
+
     bool first = true;
     bool prevHeader = false;
     for (size_t r = 0; r < nrow;) {
         const size_t r1 = std::max(groupEnd[r], r);
-        if (!placeRows(r, r1, first, prevHeader, false)) {
-            // 段の末尾で閉じて次の段へ。ヘッダ行を繰り返す
-            if (b.horizontal) {
-                fillLogicalRect(tableLeft, tableRight, region().used - b.outer * 0.5f,
-                                region().used + b.outer * 0.5f, b.color);
+        bool hasRowspanStart = false;
+        for (const GCell& g : cells) if (g.row == r && g.rowspan > 1) hasRowspanStart = true;
+        const Pt groupExtent = [&]() { Pt e = 0.0f; for (size_t k = r; k <= r1; ++k) e += rowH[k]; return e; }();
+        const bool tooTall = groupExtent + b.outer > region().blockExtent();
+
+        if (r1 == r && !hasRowspanStart && tooTall) {
+            if (!region().fresh() && region().remaining() < region().blockExtent() * 0.3f) {
+                bottomRule();
+                nextRegion();
+                if (aborted()) return;
+                first = true;
+                prevHeader = false;
+                if (table.repeatHeader && headerCount > 0 && r >= headerCount) {
+                    placeRows(0, headerCount - 1, true, false, true);
+                    first = false;
+                    prevHeader = true;
+                }
             }
+            placeSplitRow(r, first, prevHeader);
+            if (aborted()) return;
+        } else if (!placeRows(r, r1, first, prevHeader, false)) {
+            bottomRule();
             nextRegion();
             if (aborted()) return;
             first = true;
@@ -900,16 +1325,13 @@ void Flower::placeTable(const block::TableBlock& table) {
                 first = false;
                 prevHeader = true;
             }
-            placeRows(r, r1, first, prevHeader, true);   // 段より大きい塊はそのまま置く（溢れ）
+            placeRows(r, r1, first, prevHeader, true);
         }
         first = false;
         prevHeader = table.rows[r1].header;
         r = r1 + 1;
     }
-    if (b.horizontal) {
-        fillLogicalRect(tableLeft, tableRight, region().used - b.outer * 0.5f,
-                        region().used + b.outer * 0.5f, b.color);
-    }
+    bottomRule();
     region().used += b.outer * 0.5f;
     pending_.reset();
     applySpaceAfter(table.block.spaceAfter);
@@ -937,14 +1359,21 @@ void Flower::placeParagraphs(const std::vector<const inl::Paragraph*>& paras,
     applySpaceAfter(style.spaceAfter);
 }
 
-void Flower::flowParagraph(const inl::Paragraph& para, const block::BlockStyle& style,
-                           const inl::Paragraph* label, Pt labelWidth, Pt labelGap,
+void Flower::flowParagraph(const inl::Paragraph& paraIn, const block::BlockStyle& style,
+                           const inl::Paragraph* labelIn, Pt labelWidth, Pt labelGap,
                            bool firstOfBlock, size_t charStart0, bool labelPlaced0) {
+    const inl::Paragraph para = resolved(paraIn);
+    std::optional<inl::Paragraph> labelResolved;
+    if (labelIn) labelResolved = resolved(*labelIn);
+    const inl::Paragraph* label = labelResolved ? &*labelResolved : nullptr;
+
     const Pt pitch = para.style.resolvedLinePitch(para.baseStyle().size);
     const Pt bodyIndent = (labelWidth > 0.0f || label) ? labelWidth + labelGap : 0.0f;
+    const bool decorated = style.background.has_value() || style.padding > 0.0f;
 
     size_t charStart = charStart0;
     bool labelPlaced = (label == nullptr) || labelPlaced0;
+    bool paddedStart = charStart0 > 0;   // 続きから組むときは前の段で先頭の余白は済んでいる
     int guard = 0;
 
     while (true) {
@@ -953,24 +1382,29 @@ void Flower::flowParagraph(const inl::Paragraph& para, const block::BlockStyle& 
         curLabelPlaced_ = labelPlaced;
 
         Region& reg = region();
-        int fit = linesThatFit(pitch);
 
-        // この段落（の先頭）を次の段へ送る。直前のブロックが keepWithNext でこの段に
-        // 置かれていれば、それも巻き取って一緒に移す
+        bool forceHere = false;   // 巻き取った先が空のページなら、ここに置くしかない
         auto moveToNextRegion = [&]() {
             if (charStart == 0 && pending_ && pending_->blk && pending_->regionIndex == regionIndex_) {
                 const Pending pend = *pending_;
                 pending_.reset();
                 page().dl.items.resize(pend.itemStart);
                 region().used = pend.usedBefore;
-                // 新しいページの先頭は巻き取った見出しになる
+                restoreNumbering(pend.numbering);
                 const size_t myBlock = curBlockIndex_;
                 const int myPara = curParaIndex_;
                 curBlockIndex_ = pend.blockIndex;
                 curParaIndex_ = 0;
                 curCharStart_ = 0;
                 curLabelPlaced_ = false;
-                nextRegion();
+                if (pageEmpty() && regionIndex_ == 0) {
+                    // 見出しだけのページだった: 次へ送っても同じことになるので、ここに置き直す
+                    pageStart_ = PageStart{pend.blockIndex, 0, 0, false};
+                    pageNumbering_ = snapshotNumbering();
+                    forceHere = true;
+                } else {
+                    nextRegion();
+                }
                 if (!aborted()) placeBlock(*pend.blk);
                 pending_.reset();
                 curBlockIndex_ = myBlock;
@@ -982,31 +1416,54 @@ void Flower::flowParagraph(const inl::Paragraph& para, const block::BlockStyle& 
             nextRegion();
         };
 
-        if (fit <= 0) {
-            if (reg.fresh()) {
-                fit = 1;   // 段より行送りが大きい: 1 行だけ置いて進める
-            } else {
+        // keepTogether: 全体が入らなければ次の段へ（段より大きければ諦めて分ける）
+        if (charStart == 0 && style.keepTogether && !reg.fresh()) {
+            const Pt need = measureParagraph(para, reg.lineLength() - bodyIndent) + 2.0f * style.padding;
+            if (need > reg.remaining() + kEps && need <= reg.blockExtent()) {
                 moveToNextRegion();
                 if (aborted()) return;
                 continue;
             }
         }
 
-        // 行の形: 排除領域（回り込み）を避け、ラベル幅ぶん下げる
+        // 先頭の余白（背景付き）
+        if (decorated && !paddedStart && style.padding > 0.0f) {
+            if (reg.remaining() < style.padding + pitch && !reg.fresh()) {
+                moveToNextRegion();
+                if (aborted()) return;
+                continue;
+            }
+        }
+        const Pt segTop = reg.used;   // 背景の始端（余白込み）
+        if (decorated && !paddedStart && style.padding > 0.0f) reg.used += style.padding;
+        paddedStart = true;
+
+        int fit = linesThatFit(pitch);
+        if (fit <= 0) {
+            if (reg.fresh() || forceHere ||
+                (decorated && reg.used - segTop >= style.padding && reg.used - style.padding <= kEps)) {
+                fit = 1;   // 段より行送りが大きい: 1 行だけ置いて進める
+            } else {
+                reg.used = segTop;
+                moveToNextRegion();
+                if (aborted()) return;
+                continue;
+            }
+        }
+
         const RegionLineShape shape(reg, reg.used, pitch, bodyIndent);
         inl::ParagraphFragment frag = layouter_.layout(para, wm(), shape, charStart, fit);
         const bool starting = (charStart == 0);
 
         if (starting && !frag.complete && static_cast<int>(frag.lines.size()) < style.orphans &&
-            !reg.fresh()) {
-            // 段末に orphans 行未満しか残らない: 段落全体を次の段へ
+            !reg.fresh() && !forceHere) {
+            reg.used = segTop;
             moveToNextRegion();
             if (aborted()) return;
             continue;
         }
 
-        // widows: 残りが widows 行未満なら、その分をこの段から送る
-        if (!frag.complete && style.widows > 1) {
+        if (!frag.complete && style.widows > 1 && !forceHere) {
             const inl::ParagraphFragment rest = layouter_.layout(para, wm(), shape, frag.charEnd, -1);
             const int remaining = static_cast<int>(rest.lines.size());
             if (remaining < style.widows) {
@@ -1015,6 +1472,7 @@ void Flower::flowParagraph(const inl::Paragraph& para, const block::BlockStyle& 
                 if (keep >= style.orphans && keep > 0) {
                     frag = layouter_.layout(para, wm(), shape, charStart, keep);
                 } else if (starting && !reg.fresh()) {
+                    reg.used = segTop;
                     moveToNextRegion();
                     if (aborted()) return;
                     continue;
@@ -1037,7 +1495,6 @@ void Flower::flowParagraph(const inl::Paragraph& para, const block::BlockStyle& 
 
         int linesUsed = static_cast<int>(frag.lines.size());
         if (!labelPlaced) {
-            // ラベルは本文 1 行目と同じ行送り位置に、行頭側 labelWidth の幅で
             inl::Paragraph lp = *label;
             lp.style.firstLineIndent = 0.0f;
             lp.style.linePitch = pitch;
@@ -1050,19 +1507,29 @@ void Flower::flowParagraph(const inl::Paragraph& para, const block::BlockStyle& 
             labelPlaced = true;
         }
         reg.used += pitch * static_cast<float>(linesUsed);
+
+        // 背景（末尾の余白は最後の断片だけ）
+        if (decorated) {
+            if (frag.complete && style.padding > 0.0f) reg.used += style.padding;
+            if (style.background) {
+                fillLogicalRect(0.0f, reg.lineLength(), segTop, reg.used, *style.background, itemStart);
+            }
+        }
         pageHasContent_ = true;
 
         if (firstOfBlock && style.keepWithNext && charStart0 == 0) {
             Pending pend;
             pend.regionIndex = regionIndex_;
-            pend.itemStart = itemStart;
-            pend.usedBefore = usedBefore;
+            pend.itemStart = std::min(itemStart, blockItemStart_);
+            pend.usedBefore = std::min(usedBefore, segTop);
             pend.blockIndex = curBlockIndex_;
+            pend.numbering = blockNumbering_;
             pending_ = pend;   // blk は placeBlock が埋める
         } else {
             pending_.reset();
         }
 
+        forceHere = false;
         if (frag.complete) break;
         charStart = frag.charEnd;
         curCharStart_ = charStart;
@@ -1079,7 +1546,14 @@ std::vector<Page> Flower::run(int totalPagesHint) {
         curBlockIndex_ = i;
         placeBlock(flow_.blocks[i]);
     }
+    // 最終ページの段揃え
+    if (opts_.balanceLastPage && columns_ > 1 && pageHasContent_ && regions_.size() > 1) {
+        bool allFull = true;
+        for (const Region& r : regions_) if (r.remaining() > r.blockExtent() * 0.1f) allFull = false;
+        if (!allFull) balanceColumns(flow_.blocks.size());
+    }
     finishPage();
+    collected_.totalPages = static_cast<int>(pages_.size());
     return std::move(pages_);
 }
 
@@ -1087,24 +1561,33 @@ std::vector<Page> Flower::run(int totalPagesHint) {
 
 std::vector<Page> FlowLayouter::layout(const block::Flow& flow, const PageSequence& seq,
                                        const FlowLayoutOptions& opts) {
-    // {pages} を使うときは総ページ数が要るので 2 回組む
-    bool needsTotal = false;
+    // 相互参照・目次・{pages} があれば 2〜3 パス。番号とページが安定したら止める
+    bool multiPass = false;
     auto uses = [&](const std::optional<RunningText>& rt) {
         if (!rt) return;
         for (const inl::InlineRun& r : rt->para.runs) {
-            if (r.text.find(u"{pages}") != std::u16string::npos) needsTotal = true;
+            if (r.text.find(u"{pages}") != std::u16string::npos) multiPass = true;
         }
     };
     uses(seq.master.header);
     uses(seq.master.footer);
-
-    int total = 0;
-    if (needsTotal) {
-        Flower first(fonts_, flow, seq, opts);
-        total = static_cast<int>(first.run(0).size());
+    for (const block::Block& blk : flow.blocks) {
+        if (std::get_if<block::TocBlock>(&blk)) multiPass = true;
+        const block::BlockStyle* st = styleOf(blk);
+        if (st && !st->label.empty()) multiPass = true;
     }
-    Flower flower(fonts_, flow, seq, opts);
-    return flower.run(total);
+
+    RefInfo info;
+    std::vector<Page> pages;
+    const int maxPasses = multiPass ? 3 : 1;
+    for (int pass = 0; pass < maxPasses; ++pass) {
+        Flower flower(fonts_, flow, seq, opts, pass == 0 ? nullptr : &info);
+        pages = flower.run(pass == 0 ? 0 : info.totalPages);
+        const RefInfo& out = flower.collected();
+        if (pass > 0 && out == info) break;
+        info = out;
+    }
+    return pages;
 }
 
 } // namespace typeset::page

@@ -29,6 +29,9 @@ struct ShapeContext {
     TextOrientation orientation = TextOrientation::Mixed;
     /// styleIndex → TextStyle
     const std::vector<TextStyle>* styles = nullptr;
+    /// styleIndex → 行内画像（無い run は nullptr）
+    const std::vector<std::shared_ptr<const dl::Image>>* images = nullptr;
+    const std::vector<Size>* imageSizes = nullptr;
 };
 
 /**

@@ -168,6 +168,7 @@ PYBIND11_MODULE(typeset, m) {
         .def_readwrite("orientation", &ParagraphStyle::orientation)
         .def_readwrite("spacing", &ParagraphStyle::spacing)
         .def_readwrite("line_break", &ParagraphStyle::lineBreak)
+        .def_readwrite("preserve_spaces", &ParagraphStyle::preserveSpaces)
         .def("copy", [](const ParagraphStyle& s) { return ParagraphStyle(s); });
 
     // ---- 注記・段落 ----
@@ -217,6 +218,11 @@ PYBIND11_MODULE(typeset, m) {
                  p.runs.push_back(inl::InlineRun{std::move(text), std::move(st)});
              }, py::arg("text"), py::arg("style"))
         .def("annotate", [](inl::Paragraph& p, inl::Annotation a) { p.annotations.push_back(std::move(a)); })
+        .def("add_image",
+             [](inl::Paragraph& p, std::shared_ptr<dl::Image> img, Size size, TextStyle st) {
+                 p.addImage(img, size, std::move(st));
+             },
+             py::arg("image"), py::arg("size"), py::arg("style"), "行内画像を足す（本文中の位置は 1 文字ぶん）")
         .def_property_readonly("text", &inl::Paragraph::text);
 
     // ---- ブロック ----
@@ -231,9 +237,13 @@ PYBIND11_MODULE(typeset, m) {
         .def_readwrite("orphans", &block::BlockStyle::orphans)
         .def_readwrite("widows", &block::BlockStyle::widows)
         .def_readwrite("keep_with_next", &block::BlockStyle::keepWithNext)
+        .def_readwrite("keep_together", &block::BlockStyle::keepTogether)
         .def_readwrite("break_before", &block::BlockStyle::breakBefore)
         .def_readwrite("break_after", &block::BlockStyle::breakAfter)
-        .def_readwrite("span_columns", &block::BlockStyle::spanColumns);
+        .def_readwrite("span_columns", &block::BlockStyle::spanColumns)
+        .def_readwrite("label", &block::BlockStyle::label)
+        .def_readwrite("background", &block::BlockStyle::background)
+        .def_readwrite("padding", &block::BlockStyle::padding);
 
     py::class_<dl::Image, std::shared_ptr<dl::Image>>(m, "Image")
         .def_readonly("width", &dl::Image::width)
@@ -264,6 +274,10 @@ PYBIND11_MODULE(typeset, m) {
         .def_readwrite("caption_gap", &block::ImageBlock::captionGap)
         .def_readwrite("block", &block::ImageBlock::block);
 
+    py::enum_<block::VAlign>(m, "VAlign")
+        .value("TOP", block::VAlign::Top)
+        .value("MIDDLE", block::VAlign::Middle)
+        .value("BOTTOM", block::VAlign::Bottom);
     py::class_<block::TableColumn>(m, "TableColumn")
         .def(py::init<>())
         .def(py::init([](Pt width, Align align) { return block::TableColumn{width, align}; }),
@@ -272,13 +286,16 @@ PYBIND11_MODULE(typeset, m) {
         .def_readwrite("align", &block::TableColumn::align);
     py::class_<block::TableCell>(m, "TableCell")
         .def(py::init<>())
-        .def(py::init([](inl::Paragraph p, int colspan, int rowspan) {
-                 block::TableCell c; c.paras.push_back(std::move(p)); c.colspan = colspan; c.rowspan = rowspan; return c;
+        .def(py::init([](inl::Paragraph p, int colspan, int rowspan, block::VAlign valign) {
+                 block::TableCell c; c.paras.push_back(std::move(p)); c.colspan = colspan; c.rowspan = rowspan;
+                 c.valign = valign; return c;
              }),
-             py::arg("paragraph"), py::arg("colspan") = 1, py::arg("rowspan") = 1)
+             py::arg("paragraph"), py::arg("colspan") = 1, py::arg("rowspan") = 1,
+             py::arg("valign") = block::VAlign::Top)
         .def_readwrite("paras", &block::TableCell::paras)
         .def_readwrite("colspan", &block::TableCell::colspan)
-        .def_readwrite("rowspan", &block::TableCell::rowspan);
+        .def_readwrite("rowspan", &block::TableCell::rowspan)
+        .def_readwrite("valign", &block::TableCell::valign);
     py::class_<block::TableRow>(m, "TableRow")
         .def(py::init<>())
         .def(py::init([](std::vector<block::TableCell> cells, bool header) {
@@ -304,14 +321,49 @@ PYBIND11_MODULE(typeset, m) {
         .def_readwrite("full_width", &block::TableBlock::fullWidth)
         .def_readwrite("align", &block::TableBlock::align)
         .def_readwrite("repeat_header", &block::TableBlock::repeatHeader)
+        .def_readwrite("caption", &block::TableBlock::caption)
+        .def_readwrite("caption_gap", &block::TableBlock::captionGap)
         .def_readwrite("block", &block::TableBlock::block);
+
+    py::enum_<block::ListBlock::Marker>(m, "ListMarker")
+        .value("BULLET", block::ListBlock::Marker::Bullet)
+        .value("NUMBERED", block::ListBlock::Marker::Numbered);
+    py::class_<block::ListBlock>(m, "ListBlock")
+        .def(py::init<>())
+        .def(py::init([](std::vector<inl::Paragraph> items, block::ListBlock::Marker marker) {
+                 block::ListBlock l; l.items = std::move(items); l.marker = marker; return l;
+             }),
+             py::arg("items"), py::arg("marker") = block::ListBlock::Marker::Bullet)
+        .def_readwrite("items", &block::ListBlock::items)
+        .def_readwrite("marker", &block::ListBlock::marker)
+        .def_readwrite("bullet", &block::ListBlock::bullet)
+        .def_readwrite("number_suffix", &block::ListBlock::numberSuffix)
+        .def_readwrite("label_width", &block::ListBlock::labelWidth)
+        .def_readwrite("gap", &block::ListBlock::gap)
+        .def_readwrite("item_gap", &block::ListBlock::itemGap)
+        .def_readwrite("block", &block::ListBlock::block);
+    py::class_<block::TocBlock>(m, "TocBlock")
+        .def(py::init<>())
+        .def(py::init([](TextStyle style, int maxLevel) {
+                 block::TocBlock t; t.style = std::move(style); t.maxLevel = maxLevel; return t;
+             }),
+             py::arg("style"), py::arg("max_level") = 2)
+        .def_readwrite("max_level", &block::TocBlock::maxLevel)
+        .def_readwrite("style", &block::TocBlock::style)
+        .def_readwrite("sub_style", &block::TocBlock::subStyle)
+        .def_readwrite("indent_per_level", &block::TocBlock::indentPerLevel)
+        .def_readwrite("line_height", &block::TocBlock::lineHeight)
+        .def_readwrite("leader", &block::TocBlock::leader)
+        .def_readwrite("block", &block::TocBlock::block);
 
     py::class_<block::Flow>(m, "Flow")
         .def(py::init<>())
         .def("add_paragraph", &block::Flow::addParagraph, py::arg("paragraph"),
              py::arg("style") = block::BlockStyle{})
         .def("add_heading", &block::Flow::addHeading, py::arg("paragraph"), py::arg("level") = 1,
-             py::arg("style") = std::nullopt)
+             py::arg("style") = std::nullopt, py::arg("numbered") = false)
+        .def("add_list", &block::Flow::addList, py::arg("list"))
+        .def("add_toc", &block::Flow::addToc, py::arg("toc"))
         .def("add_labeled", &block::Flow::addLabeled, py::arg("label"), py::arg("body"),
              py::arg("label_width"), py::arg("gap") = 0.0f, py::arg("style") = block::BlockStyle{})
         .def("add_rule", &block::Flow::addRule, py::arg("thickness") = 0.5f,
@@ -401,16 +453,22 @@ PYBIND11_MODULE(typeset, m) {
         .def(py::init<font::FontSet&>(), py::arg("fonts"), py::keep_alive<1, 2>())
         .def("layout",
              [](page::FlowLayouter& l, const block::Flow& flow, const page::PageSequence& seq,
-                std::map<std::u16string, std::u16string> fields, bool drawGuides) {
+                std::map<std::u16string, std::u16string> fields, bool drawGuides, bool balanceLastPage,
+                std::u16string figureFormat, std::u16string tableFormat) {
                  page::FlowLayoutOptions o;
                  o.fields = std::move(fields);
                  o.drawGuides = drawGuides;
+                 o.balanceLastPage = balanceLastPage;
+                 o.figureFormat = std::move(figureFormat);
+                 o.tableFormat = std::move(tableFormat);
                  return l.layout(flow, seq, o);
              },
              py::arg("flow"), py::arg("sequence"),
              py::arg("fields") = std::map<std::u16string, std::u16string>{},
-             py::arg("draw_guides") = false,
-             "Flow をページ列へ流し込む。fields は柱・ノンブルの {name} 置換");
+             py::arg("draw_guides") = false, py::arg("balance_last_page") = true,
+             py::arg("figure_format") = std::u16string(u"図 {n}"),
+             py::arg("table_format") = std::u16string(u"表 {n}"),
+             "Flow をページ列へ流し込む。fields は柱・ノンブル・本文の {name} 置換");
 
     m.def("save_pdf",
           [](const std::vector<page::Page>& pages, const std::string& path, const std::string& title,

@@ -93,9 +93,18 @@ struct ImageItem {
     float opacity = 1.0f;
 };
 
+/**
+ * しおり（PDF のアウトライン）。描画はしない
+ */
+struct Bookmark {
+    std::u16string title;
+    int level = 1;
+    Point pos;                      ///< ジャンプ先（ページ座標）
+};
+
 struct Group;
 
-using Item = std::variant<GlyphRun, PathItem, RectItem, ImageItem, Group>;
+using Item = std::variant<GlyphRun, PathItem, RectItem, ImageItem, Group, Bookmark>;
 
 /**
  * 変形・クリップ・不透明度のスコープ

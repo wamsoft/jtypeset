@@ -30,6 +30,20 @@ std::shared_ptr<dl::Image> solidImage(int w, int h) {
     return image::fromRgba(w, h, px.data());
 }
 
+bool glyphsWithin(const dl::DisplayList& list, const Rect& rect, Pt slack) {
+    for (const dl::Item& item : list.items) {
+        if (const auto* run = std::get_if<dl::GlyphRun>(&item)) {
+            for (const dl::Glyph& g : run->glyphs) {
+                if (g.pos.x < rect.x - slack || g.pos.x > rect.right() + slack ||
+                    g.pos.y < rect.y - slack || g.pos.y > rect.bottom() + slack) {
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
 int countItems(const dl::DisplayList& list, int kind) {
     int n = 0;
     for (const dl::Item& item : list.items) {
@@ -337,4 +351,171 @@ TEST_CASE("FlowLayouter: spanning block mid-page balances the columns above it")
         }
     }
     CHECK(headingAtLeft);
+}
+
+TEST_CASE("FlowLayouter: numbered headings, cross references and TOC resolve over passes") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+
+    page::PageSequence seq;
+    seq.master.size = Size{400, 300};
+    seq.master.margin = page::Margins{30, 30, 30, 30};
+    seq.master.writingMode = WritingMode::HorizontalTb;
+
+    block::Flow flow;
+    block::TocBlock toc;
+    toc.style = fx.style(10.0f);
+    flow.addToc(toc);
+    flow.addPageBreak();
+    block::BlockStyle hs;
+    hs.label = "sec-a";
+    flow.addHeading(inl::Paragraph::plain(u"最初の章", fx.style(14.0f)), 1, hs, true);
+    flow.addParagraph(inl::Paragraph::plain(u"第 {ref:sec-b} 章は {page:sec-b} ページ。図 {ref:fig-x} を見よ。", fx.style(10.0f)));
+    block::BlockStyle hs2;
+    hs2.label = "sec-b";
+    hs2.breakBefore = block::BreakKind::Page;
+    flow.addHeading(inl::Paragraph::plain(u"次の章", fx.style(14.0f)), 1, hs2, true);
+    flow.addHeading(inl::Paragraph::plain(u"節", fx.style(12.0f)), 2, std::nullopt, true);
+    block::ImageBlock img;
+    img.image = solidImage(40, 40);
+    img.size = Size{40, 40};
+    img.caption = inl::Paragraph::plain(u"{fig}　絵", fx.style(8.0f));
+    img.block.label = "fig-x";
+    flow.addImage(img);
+
+    page::FlowLayouter layouter(fx.fonts);
+    const auto pages = layouter.layout(flow, seq);
+    REQUIRE(pages.size() == 3);
+
+    // 目次（1 ページ目）に見出し 3 つ分のページ番号「2」「3」「3」が出る: 数字のグリフを数える
+    auto countGid = [&](const dl::DisplayList& l, char32_t c) {
+        const uint32_t gid = fx.jp->glyphIndex(c);
+        int n = 0;
+        for (const dl::Item& item : l.items) {
+            if (const auto* run = std::get_if<dl::GlyphRun>(&item)) {
+                for (const dl::Glyph& g : run->glyphs) if (g.gid == gid) ++n;
+            }
+        }
+        return n;
+    };
+    CHECK(countGid(pages[0].dl, U'次') >= 1);      // 「次の章」
+    CHECK(countGid(pages[0].dl, U'3') >= 2);       // ページ番号 3 が 2 回（次の章・節）
+    // 本文の参照が解決している: 「第 2 章は 3 ページ。図 1 を見よ。」→ '2' '3' '1' がある
+    CHECK(countGid(pages[1].dl, U'2') >= 1);
+    CHECK(countGid(pages[1].dl, U'3') >= 1);
+    // しおりが 3 つ
+    int bookmarks = 0;
+    for (const page::Page& pg : pages) {
+        for (const dl::Item& item : pg.dl.items) if (std::get_if<dl::Bookmark>(&item)) ++bookmarks;
+    }
+    CHECK(bookmarks == 3);
+}
+
+TEST_CASE("FlowLayouter: a table row taller than the page is split across pages") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+
+    page::PageSequence seq;
+    seq.master.size = Size{300, 200};
+    seq.master.margin = page::Margins{20, 20, 20, 20};
+    seq.master.writingMode = WritingMode::HorizontalTb;
+
+    block::TableBlock t;
+    t.columns = {block::TableColumn{50.0f}, block::TableColumn{0.0f}};
+    std::u16string longText;
+    for (int i = 0; i < 40; ++i) longText += u"長いセルの文章。";
+    auto cell = [&](std::u16string s) {
+        block::TableCell c;
+        inl::Paragraph p = inl::Paragraph::plain(std::move(s), fx.style(9.0f));
+        p.style.lineHeight = 1.4f;
+        c.paras.push_back(p);
+        return c;
+    };
+    block::TableRow head;
+    head.header = true;
+    head.cells = {cell(u"項目"), cell(u"説明")};
+    block::TableRow r1;
+    r1.cells = {cell(u"長い"), cell(longText)};
+    block::TableRow r2;
+    r2.cells = {cell(u"短い"), cell(u"おわり。")};
+    t.rows = {head, r1, r2};
+    block::Flow flow;
+    flow.addTable(t);
+
+    page::FlowLayouter layouter(fx.fonts);
+    const auto pages = layouter.layout(flow, seq);
+    REQUIRE(pages.size() >= 2);
+    // 長いセルの文字が複数ページに分かれ、全部合わせると元の文字数になる（ヘッダ・他セル分を除く）
+    const uint32_t gNaga = fx.jp->glyphIndex(U'長');
+    int total = 0;
+    for (const page::Page& pg : pages) {
+        for (const dl::Item& item : pg.dl.items) {
+            if (const auto* run = std::get_if<dl::GlyphRun>(&item)) {
+                for (const dl::Glyph& g : run->glyphs) if (g.gid == gNaga) ++total;
+            }
+        }
+    }
+    CHECK(total == 40 + 1);   // 本文 40 回 ＋ セル「長い」
+    // 各ページのグリフが版面内
+    for (const page::Page& pg : pages) {
+        CHECK(glyphsWithin(pg.dl, seq.master.bodyRect(pg.number), 12.0f));
+    }
+}
+
+TEST_CASE("FlowLayouter: list markers, code background and inline image") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+
+    page::PageSequence seq;
+    seq.master.size = Size{300, 300};
+    seq.master.margin = page::Margins{30, 30, 30, 30};
+    seq.master.writingMode = WritingMode::HorizontalTb;
+
+    block::Flow flow;
+    block::ListBlock list;
+    list.marker = block::ListBlock::Marker::Numbered;
+    list.items.push_back(inl::Paragraph::plain(u"一つ目", fx.style(10.0f)));
+    list.items.push_back(inl::Paragraph::plain(u"二つ目", fx.style(10.0f)));
+    flow.addList(list);
+
+    inl::Paragraph code = inl::Paragraph::plain(u"  indented\nline", fx.style(9.0f));
+    code.style.preserveSpaces = true;
+    code.style.align = Align::Start;
+    block::BlockStyle cs;
+    cs.background = Color::rgb(230, 230, 230);
+    cs.padding = 4.0f;
+    flow.addParagraph(code, cs);
+
+    inl::Paragraph withImage;
+    withImage.runs.push_back(inl::InlineRun{u"前", fx.style(10.0f)});
+    withImage.addImage(solidImage(10, 10), Size{12, 12}, fx.style(10.0f));
+    withImage.runs.push_back(inl::InlineRun{u"後", fx.style(10.0f)});
+    flow.addParagraph(withImage);
+
+    page::FlowLayouter layouter(fx.fonts);
+    const auto pages = layouter.layout(flow, seq);
+    REQUIRE(pages.size() == 1);
+    const dl::DisplayList& l = pages[0].dl;
+    // 番号 "1." "2." のグリフ
+    const uint32_t g1 = fx.jp->glyphIndex(U'1'), g2 = fx.jp->glyphIndex(U'2');
+    int n1 = 0, n2 = 0;
+    for (const dl::Item& item : l.items) {
+        if (const auto* run = std::get_if<dl::GlyphRun>(&item)) {
+            for (const dl::Glyph& g : run->glyphs) { if (g.gid == g1) ++n1; if (g.gid == g2) ++n2; }
+        }
+    }
+    CHECK(n1 == 1);
+    CHECK(n2 == 1);
+    // 背景の矩形と行内画像
+    CHECK(countItems(l, 1) >= 1);
+    CHECK(countItems(l, 0) == 1);
+    // 空白保持: "  indented" の先頭 i は行頭より右にある
+    const uint32_t gi = fx.jp->glyphIndex(U'i');
+    float xi = -1;
+    for (const dl::Item& item : l.items) {
+        if (const auto* run = std::get_if<dl::GlyphRun>(&item)) {
+            for (const dl::Glyph& g : run->glyphs) if (g.gid == gi && xi < 0) xi = g.pos.x;
+        }
+    }
+    CHECK(xi > 30.0f + 3.0f);
 }

@@ -32,6 +32,8 @@ struct ItemBuildContext {
     const TextStyle* baseStyle = nullptr;
     /// 字間（em）。クラスタ間の Glue に足す
     float letterSpacing = 0.0f;
+    /// 欧文間隔を固定幅の箱にする（ParagraphStyle::preserveSpaces）
+    bool preserveSpaces = false;
 };
 
 /**

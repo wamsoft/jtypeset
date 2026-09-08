@@ -8,6 +8,7 @@
 
 #include <glyphware/Face.h>
 
+#include "typeset/dl/display_list.hpp"
 #include "typeset/geom.hpp"
 #include "typeset/style.hpp"
 #include "typeset/text/char_class.hpp"
@@ -35,6 +36,10 @@ struct PlacedGlyph {
     uint32_t charIndex = 0; ///< 元テキストでの位置（UTF-16）
     Pt embolden = 0.0f;     ///< フェイクボールドの太らせ幅
     uint32_t styleIndex = 0;///< 色・縁取りを引くためのスタイル番号
+
+    /// 行内画像（グリフではなく画像を置く）。block は画像中心の中心線からのずれ
+    std::shared_ptr<const dl::Image> image;
+    Size imageSize;
 };
 
 /**
@@ -53,6 +58,7 @@ struct ShapedCluster {
     text::CharClass charClass = text::CharClass::Unknown;
     bool upright = true;    ///< 正立か横倒しか（横組みでは常に true）
     uint32_t styleIndex = 0;
+    bool object = false;    ///< 行内画像などの箱（ボディ幅はシェイパーの送りのまま）
 };
 
 struct ShapedText {

@@ -25,10 +25,12 @@
  */
 namespace typeset::inl {
 
-/// スタイルの付いたテキスト片
+/// スタイルの付いたテキスト片。image が付いていれば行内画像（text は U+FFFC 1 文字）
 struct InlineRun {
     std::u16string text;
     TextStyle style;
+    std::shared_ptr<const dl::Image> image;
+    Size imageSize;         ///< pt。0 なら画素数を 72dpi として使い、片方 0 なら縦横比を保つ
 };
 
 struct Paragraph {
@@ -45,6 +47,16 @@ struct Paragraph {
         p.runs.push_back(InlineRun{std::move(text), std::move(style)});
         p.style = std::move(pstyle);
         return p;
+    }
+
+    /// 行内画像を足す（本文中の位置は U+FFFC 1 文字ぶん）
+    void addImage(std::shared_ptr<const dl::Image> image, Size size, TextStyle style) {
+        InlineRun r;
+        r.text = u"\uFFFC";
+        r.style = std::move(style);
+        r.image = std::move(image);
+        r.imageSize = size;
+        runs.push_back(std::move(r));
     }
 };
 

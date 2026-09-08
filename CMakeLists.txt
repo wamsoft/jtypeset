@@ -110,6 +110,9 @@ if(TYPESET_BUILD_SAMPLES)
 
     add_executable(sample_tech samples/sample_tech.cpp)
     target_link_libraries(sample_tech PRIVATE typeset)
+
+    add_executable(sample_report samples/sample_report.cpp)
+    target_link_libraries(sample_report PRIVATE typeset)
 endif()
 
 #------------------------------------------------------------------------------

@@ -469,6 +469,10 @@ std::vector<LineItem> buildLineItems(const ShapedText& shaped,
             continue;
         }
         const ShapedCluster& c = shaped.clusters[ci];
+        if (c.object) {
+            bodyWidths[ci] = c.advance;   // 行内画像などはシェイパーの送りがそのまま箱
+            continue;
+        }
         const Pt em = emOf(ci);
         float bodyEm = opts.punctuationSpacing ? text::getBodyWidth(c.charClass) : 0.0f;
         if (!opts.punctuationSpacing && text::isJapanese(c.charClass)) bodyEm = 1.0f;
@@ -636,8 +640,8 @@ std::vector<LineItem> buildLineItems(const ShapedText& shaped,
         const int compIdx = composite[ci];
         const Pt em = emOf(ci);
 
-        // 欧文間隔は Box ではなく Glue（そこが唯一の欧文の切れ目）
-        if (cls == CharClass::Space && compIdx == kNone) {
+        // 欧文間隔は Box ではなく Glue（そこが唯一の欧文の切れ目）。空白を保持する段落では固定幅の箱
+        if (cls == CharClass::Space && compIdx == kNone && !ctx.preserveSpaces) {
             const Pt w = cluster.advance;
             items.push_back(LineItem::gluePt(w, w * 0.5f, w / 3.0f, cluster.charStart));
             prevWasBox = false;

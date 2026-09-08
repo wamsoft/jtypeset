@@ -23,10 +23,17 @@
 namespace typeset::page {
 
 struct FlowLayoutOptions {
-    /// `{title}` 等の置換フィールド（`{page}` `{pages}` は自動）
+    /// `{title}` 等の置換フィールド（`{page}` `{pages}` は自動。本文中の `{ref:ラベル}` `{page:ラベル}` `{fig}` `{table}` も置換する）
     std::map<std::u16string, std::u16string> fields;
     /// 版面・段の枠を薄く描く（デバッグ用）
     bool drawGuides = false;
+    /// 最終ページ（段組）の段の高さを揃える
+    bool balanceLastPage = true;
+    /// 見出し番号の後ろに付ける区切り
+    std::u16string headingNumberSeparator = u" ";
+    /// 図番号・表番号の書式（`{n}` が番号）
+    std::u16string figureFormat = u"図 {n}";
+    std::u16string tableFormat = u"表 {n}";
 };
 
 class FlowLayouter {

@@ -53,7 +53,18 @@ make test
 ./build/x64-windows/Release/sample_script.exe   # 台本（A5 縦組み、名前欄＋本文、柱・ノンブル）
 ./build/x64-windows/Release/sample_novel.exe    # 小説（B6 縦組み 2 段、章見出し、ルビ）
 ./build/x64-windows/Release/sample_tech.exe     # 技術文書（A4 横組み、回り込みの図、表、2 段組）
+./build/x64-windows/Release/sample_report.exe   # レポート（目次、見出し採番、図表番号と相互参照、箇条書き、コード、しおり）
 ```
+
+## できること（2026-09 時点）
+
+- 縦組み・横組みの JLReq 組版（約物の詰め・禁則・追い込み／追い出し・ぶら下げ・両端揃え、Greedy / Knuth–Plass）
+- ルビ（グループ／モノ／熟語）・縦中横・圏点・割注・字取り、行内画像
+- 段落・見出し（自動採番、PDF しおり）・箇条書き・コードブロック（背景・空白保持）・罫線・ラベル付き段落（台本の名前欄）
+- 画像（配置・回り込み・キャプション）、表（自動列幅、colspan / rowspan、セルの縦位置、ヘッダ繰り返し、段より高い行の分割）
+- ページマスタ（判型・内外余白・段組・柱・ノンブル）、改ページ制御（orphans / widows / keepWithNext / keepTogether）、
+  段の途中の段抜きと最終ページの段揃え、目次、図表番号と相互参照（`{ref:label}` `{page:label}`）
+- 出力: ラスタ（PNG）、PDF（Identity-H・hb-subset・Flate・画像・しおり）、SVG。Python バインディング
 
 ## Python
 

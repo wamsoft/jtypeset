@@ -105,6 +105,9 @@ struct ParagraphStyle {
     SpacingOptions spacing;
     BreakOptions lineBreak;
 
+    /// 欧文間隔を伸縮しない固定幅の箱にする（コードブロック等。行頭の空白も残る）
+    bool preserveSpaces = false;
+
     /// 実効の行送り
     Pt resolvedLinePitch(Pt fontSize) const {
         return linePitch > 0.0f ? linePitch : fontSize * lineHeight;

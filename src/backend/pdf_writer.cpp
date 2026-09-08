@@ -57,6 +57,14 @@ std::string escapeString(const std::string& s) {
     return out;
 }
 
+/// PDF のテキスト文字列（UTF-16BE、BOM 付き 16 進）
+std::string utf16String(const std::u16string& s) {
+    std::string out = "<FEFF";
+    for (char16_t c : s) out += hex4(c);
+    out += ">";
+    return out;
+}
+
 /// PDF 名前に使える形へ（英数字と一部記号のみ）
 std::string sanitizeName(const std::string& s) {
     std::string out;
@@ -207,6 +215,13 @@ struct PdfWriter::Impl {
         std::string name;              ///< /Im1 など
     };
 
+    struct OutlineEntry {
+        std::u16string title;
+        int level = 1;
+        size_t pageIndex = 0;
+        float x = 0.0f, y = 0.0f;      ///< PDF 座標（y-up）
+    };
+
     std::string title;
     std::string author;
     std::string creator = "typeset";
@@ -221,6 +236,7 @@ struct PdfWriter::Impl {
     std::vector<std::string> warnings;
     std::vector<ImageResource> images;
     std::unordered_map<const dl::Image*, size_t> imageMap;
+    std::vector<OutlineEntry> outline;
 
     // --- 現在のページの描画状態 ---
     std::string curFontName;
@@ -572,6 +588,15 @@ void PdfWriter::Impl::drawItems(const std::vector<dl::Item>& items, const Matrix
             drawPath(path, ctm, r->fill, std::nullopt, false, opacity);
         } else if (const auto* img = std::get_if<dl::ImageItem>(&item)) {
             drawImage(*img, ctm, opacity);
+        } else if (const auto* bm = std::get_if<dl::Bookmark>(&item)) {
+            OutlineEntry e;
+            e.title = bm->title;
+            e.level = std::max(1, bm->level);
+            e.pageIndex = pages.size() - 1;
+            const Point p = ctm.apply(bm->pos);
+            e.x = p.x;
+            e.y = page().height - p.y;
+            outline.push_back(std::move(e));
         } else if (const auto* group = std::get_if<dl::Group>(&item)) {
             std::string& out = page().content;
             out += "q\n";
@@ -849,7 +874,65 @@ std::string PdfWriter::build() {
     kids += "]";
     objects[pagesId - 1] = "<< /Type /Pages /Kids " + kids + " /Count " +
                            std::to_string(pageIds.size()) + " >>";
-    objects[catalogId - 1] = "<< /Type /Catalog /Pages " + std::to_string(pagesId) + " 0 R >>";
+
+    // --- しおり（アウトライン）: レベルで木にする ---
+    std::string outlineRef;
+    if (!impl_->outline.empty()) {
+        const auto& ol = impl_->outline;
+        const size_t n = ol.size();
+        const int rootId = addObject("");
+        std::vector<int> ids(n);
+        for (size_t i = 0; i < n; ++i) ids[i] = addObject("");
+        std::vector<int> parent(n, -1);          // -1 = root
+        std::vector<std::vector<size_t>> children(n + 1);   // children[n] = root の子
+        std::vector<int> stack;                  // 直近の各レベルのエントリ
+        for (size_t i = 0; i < n; ++i) {
+            while (!stack.empty() && ol[stack.back()].level >= ol[i].level) stack.pop_back();
+            parent[i] = stack.empty() ? -1 : stack.back();
+            children[parent[i] < 0 ? n : static_cast<size_t>(parent[i])].push_back(i);
+            stack.push_back(static_cast<int>(i));
+        }
+        // 子孫の数（開いた状態で正の Count）
+        std::vector<int> descendants(n, 0);
+        for (size_t i = n; i-- > 0;) {
+            int c = 0;
+            for (size_t ch : children[i]) c += 1 + descendants[ch];
+            descendants[i] = c;
+        }
+        auto refOf = [&](int idx) { return std::to_string(idx < 0 ? rootId : ids[idx]) + " 0 R"; };
+        for (size_t i = 0; i < n; ++i) {
+            const std::vector<size_t>& sib = children[parent[i] < 0 ? n : static_cast<size_t>(parent[i])];
+            const auto it = std::find(sib.begin(), sib.end(), i);
+            std::string o = "<< /Title " + utf16String(ol[i].title) + " /Parent " + refOf(parent[i]);
+            if (it != sib.begin()) o += " /Prev " + std::to_string(ids[*(it - 1)]) + " 0 R";
+            if (it + 1 != sib.end()) o += " /Next " + std::to_string(ids[*(it + 1)]) + " 0 R";
+            if (!children[i].empty()) {
+                o += " /First " + std::to_string(ids[children[i].front()]) + " 0 R";
+                o += " /Last " + std::to_string(ids[children[i].back()]) + " 0 R";
+                o += " /Count " + std::to_string(descendants[i]);
+            }
+            if (ol[i].pageIndex < pageIds.size()) {
+                o += " /Dest [" + std::to_string(pageIds[ol[i].pageIndex]) + " 0 R /XYZ " +
+                     num(ol[i].x) + " " + num(ol[i].y) + " null]";
+            }
+            o += " >>";
+            objects[ids[i] - 1] = o;
+        }
+        int total = 0;
+        for (size_t ch : children[n]) total += 1 + descendants[ch];
+        std::string rootObj = "<< /Type /Outlines";
+        if (!children[n].empty()) {
+            rootObj += " /First " + std::to_string(ids[children[n].front()]) + " 0 R";
+            rootObj += " /Last " + std::to_string(ids[children[n].back()]) + " 0 R";
+            rootObj += " /Count " + std::to_string(total);
+        }
+        rootObj += " >>";
+        objects[rootId - 1] = rootObj;
+        outlineRef = " /Outlines " + std::to_string(rootId) + " 0 R /PageMode /UseOutlines";
+    }
+
+    objects[catalogId - 1] = "<< /Type /Catalog /Pages " + std::to_string(pagesId) + " 0 R" +
+                             outlineRef + " >>";
 
     // --- 文書情報 ---
     int infoId = 0;

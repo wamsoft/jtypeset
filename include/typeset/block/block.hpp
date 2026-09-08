@@ -27,9 +27,17 @@ struct BlockStyle {
     int orphans = 1;            ///< 段の末尾に残す最小行数
     int widows = 1;             ///< 段の先頭に送る最小行数
     bool keepWithNext = false;  ///< 次のブロックと同じ段に置く（見出し）
+    bool keepTogether = false;  ///< ブロックを段の境で分けない（段より大きければ分ける）
     BreakKind breakBefore = BreakKind::Auto;
     BreakKind breakAfter = BreakKind::Auto;
     bool spanColumns = false;   ///< 段抜き（全幅に置く。段組のときだけ意味がある）
+
+    /// 相互参照のラベル。本文の `{ref:ラベル}` が番号（見出し・図・表）、`{page:ラベル}` がページ番号になる
+    std::string label;
+
+    /// 背景（段落・コードブロック用）。padding は背景の内側の余白（行送り方向）
+    std::optional<Color> background;
+    Pt padding = 0.0f;
 };
 
 struct ParagraphBlock {
@@ -40,6 +48,10 @@ struct ParagraphBlock {
 struct HeadingBlock {
     inl::Paragraph para;
     int level = 1;
+    /// 自動採番（レベル 1: "1."、レベル 2 以降: "1.1"）を見出しの前に付ける
+    bool numbered = false;
+    /// PDF のしおりに入れる
+    bool bookmark = true;
     BlockStyle block = [] { BlockStyle b; b.keepWithNext = true; return b; }();
 };
 
@@ -97,7 +109,8 @@ struct ImageBlock {
     ImagePlacement placement = ImagePlacement::Block;
     Align align = Align::Center;            ///< Block のときの行方向の揃え
     Pt gap = 6.0f;                          ///< 回り込みの本文との間隔
-    std::optional<inl::Paragraph> caption;  ///< 画像の下（行送り方向の後）に置く
+    /// 画像の下（行送り方向の後）に置く。テキストの `{fig}` は図番号になる
+    std::optional<inl::Paragraph> caption;
     Pt captionGap = 3.0f;
     BlockStyle block;
 };
@@ -112,10 +125,13 @@ struct TableColumn {
     Align align = Align::Start;     ///< セル内の揃え（段落の align を上書き）
 };
 
+enum class VAlign : uint8_t { Top, Middle, Bottom };
+
 struct TableCell {
     std::vector<inl::Paragraph> paras;
     int colspan = 1;
     int rowspan = 1;    ///< 下の行へまたぐ。またいだ行はページをまたがない（まとめて次の段へ）
+    VAlign valign = VAlign::Top;
 };
 
 struct TableRow {
@@ -140,11 +156,42 @@ struct TableBlock {
     bool fullWidth = true;              ///< 段の幅いっぱいに広げる（false なら自然幅で align）
     Align align = Align::Start;
     bool repeatHeader = true;
+    /// 表の上に置くキャプション。テキストの `{table}` は表番号になる
+    std::optional<inl::Paragraph> caption;
+    Pt captionGap = 3.0f;
+    BlockStyle block;
+};
+
+/**
+ * 箇条書き（ラベル付き段落の列）
+ */
+struct ListBlock {
+    enum class Marker : uint8_t { Bullet, Numbered };
+    std::vector<inl::Paragraph> items;
+    Marker marker = Marker::Bullet;
+    std::u16string bullet = u"・";
+    std::u16string numberSuffix = u".";     ///< Numbered のとき "1." の "."
+    Pt labelWidth = 0.0f;                   ///< 0 なら 1.5em（本文サイズ基準）
+    Pt gap = 0.0f;
+    Pt itemGap = 0.0f;                      ///< 項目間のアキ
+    BlockStyle block;
+};
+
+/**
+ * 目次。前のパスで集めた見出し（番号付き）とページ番号を並べる
+ */
+struct TocBlock {
+    int maxLevel = 2;
+    TextStyle style;                        ///< 項目の文字（level 1）
+    std::optional<TextStyle> subStyle;      ///< level 2 以降（無ければ style）
+    Pt indentPerLevel = 0.0f;               ///< 0 なら 1em
+    Pt lineHeight = 1.8f;
+    bool leader = true;                     ///< 点線
     BlockStyle block;
 };
 
 using Block = std::variant<ParagraphBlock, HeadingBlock, RuleBlock, SpacerBlock, LabeledBlock,
-                           SectionBlock, ImageBlock, TableBlock>;
+                           SectionBlock, ImageBlock, TableBlock, ListBlock, TocBlock>;
 
 struct Flow {
     std::vector<Block> blocks;
@@ -153,13 +200,17 @@ struct Flow {
     void addParagraph(inl::Paragraph p, BlockStyle style = {}) {
         blocks.push_back(ParagraphBlock{std::move(p), std::move(style)});
     }
-    void addHeading(inl::Paragraph p, int level = 1, std::optional<BlockStyle> style = std::nullopt) {
+    void addHeading(inl::Paragraph p, int level = 1, std::optional<BlockStyle> style = std::nullopt,
+                    bool numbered = false) {
         HeadingBlock h;
         h.para = std::move(p);
         h.level = level;
+        h.numbered = numbered;
         if (style) h.block = *style;
         blocks.push_back(std::move(h));
     }
+    void addList(ListBlock list) { blocks.push_back(std::move(list)); }
+    void addToc(TocBlock toc) { blocks.push_back(std::move(toc)); }
     void addLabeled(inl::Paragraph label, inl::Paragraph body, Pt labelWidth, Pt gap = 0.0f,
                     BlockStyle style = {}) {
         LabeledBlock b;

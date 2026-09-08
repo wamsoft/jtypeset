@@ -57,7 +57,13 @@ ParagraphFragment ParagraphLayouter::layout(const Paragraph& para, WritingMode w
                                             size_t charStart, int maxLines,
                                             int firstLineIndex) {
     ParagraphFragment frag;
-    for (const InlineRun& r : para.runs) frag.styles.push_back(r.style);
+    std::vector<std::shared_ptr<const dl::Image>> images;
+    std::vector<Size> imageSizes;
+    for (const InlineRun& r : para.runs) {
+        frag.styles.push_back(r.style);
+        images.push_back(r.image);
+        imageSizes.push_back(r.imageSize);
+    }
     if (frag.styles.empty()) frag.styles.push_back(TextStyle{});
 
     const TextStyle& base = para.baseStyle();
@@ -124,11 +130,11 @@ ParagraphFragment ParagraphLayouter::layout(const Paragraph& para, WritingMode w
             const std::vector<StyleRun> runs = clipRuns(allRuns, pos, trimmed);
             const std::vector<Annotation> anns = clipAnnotations(para.annotations, pos, trimmed);
 
-            ShapeContext sctx{fonts_, wm, para.style.orientation, &frag.styles};
+            ShapeContext sctx{fonts_, wm, para.style.orientation, &frag.styles, &images, &imageSizes};
             const ShapedText shaped = shapeText(sub, runs, sctx);
 
             ItemBuildContext ictx{fonts_, wm, para.style.orientation, &frag.styles, &base,
-                                  base.letterSpacing};
+                                  base.letterSpacing, para.style.preserveSpaces};
             const std::vector<LineItem> items =
                 buildLineItems(shaped, anns, para.style.spacing, ictx);
 
@@ -185,7 +191,7 @@ ParagraphFragment ParagraphLayouter::layout(const Paragraph& para, WritingMode w
                             glyph.charIndex += static_cast<uint32_t>(pos);
                             line.glyphs.push_back(std::move(glyph));
                         }
-                        if (!cluster.upright) {
+                        if (!cluster.upright || cluster.object) {
                             line.blockMin = std::min(line.blockMin, shaped.blockMin);
                             line.blockMax = std::max(line.blockMax, shaped.blockMax);
                         }
@@ -244,6 +250,20 @@ void emitParagraph(dl::DisplayList& out, const ParagraphFragment& frag, WritingM
         };
 
         for (const PlacedGlyph& g : line.glyphs) {
+            if (g.image) {
+                // 行内画像: 中心を (inline_ + adv/2, block) に置く
+                flush();
+                const bool vertical = isVertical(wm);
+                const Pt adv = vertical ? g.imageSize.h : g.imageSize.w;
+                const Point c = toPhysical(wm, LogicalPoint{g.inline_ + adv * 0.5f, g.block}, lo);
+                dl::ImageItem item;
+                item.image = g.image;
+                item.xform = multiply(Matrix::translation(c.x - g.imageSize.w * 0.5f, c.y - g.imageSize.h * 0.5f),
+                                      Matrix::scaling(g.imageSize.w / static_cast<float>(std::max(1, g.image->width)),
+                                                      g.imageSize.h / static_cast<float>(std::max(1, g.image->height))));
+                out.add(item);
+                continue;
+            }
             const TextStyle& style = (g.styleIndex < frag.styles.size())
                                          ? frag.styles[g.styleIndex] : frag.styles.front();
             const bool same = open && run.face == g.face && run.size == g.size &&
