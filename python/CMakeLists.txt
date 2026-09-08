@@ -44,3 +44,13 @@ add_dependencies(typeset_py_sources typeset_py)
 install(TARGETS typeset_py
         LIBRARY DESTINATION jtypeset
         RUNTIME DESTINATION jtypeset)
+
+# MicroTeX（LaTeX 数式）ハンドラ: 拡張にリンクし、数式フォント（res）を jtypeset/microtex_res に同梱する
+if(TARGET typeset_microtex)
+    target_link_libraries(typeset_py PRIVATE typeset_microtex)
+    target_compile_definitions(typeset_py PRIVATE TYPESET_HAS_MICROTEX)
+    add_custom_command(TARGET typeset_py_sources POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${TYPESET_MICROTEX_RES_DIR}" "$<TARGET_FILE_DIR:typeset_py>/microtex_res"
+        COMMENT "copy MicroTeX res into the python package")
+    install(DIRECTORY "${TYPESET_MICROTEX_RES_DIR}/" DESTINATION jtypeset/microtex_res)
+endif()

@@ -80,7 +80,7 @@ class Options:
     header: Optional[str] = None      # 柱（{title} {page} {pages}）。None なら題名
     footer: Optional[str] = "{page} / {pages}"
     links: str = "footnote"           # footnote / inline / none
-    math: Dict[str, Any] = field(default_factory=dict)   # {"handler": "command", "command": "..."} / {"handler": "mathtext"}
+    math: Dict[str, Any] = field(default_factory=dict)   # handler: auto（既定。MicroTeX があれば使う）/ microtex / mathtext / command / none
     figure_format: str = "図 {n}"
     table_format: str = "表 {n}"
     equation_format: str = "({n})"
@@ -240,11 +240,23 @@ class Converter:
 
     def _setup_math(self) -> None:
         m = self.opts.math or {}
-        handler = str(m.get("handler", "none")).lower()
+        handler = str(m.get("handler", "auto")).lower()
+        if handler == "auto":
+            handler = "microtex" if getattr(ts, "HAS_MICROTEX", False) else "none"
         if handler in ("none", ""):
             return
         self.registry = ts.ObjectRegistry()
-        if handler == "command":
+        if handler == "microtex":
+            if not getattr(ts, "HAS_MICROTEX", False):
+                self.warnings.append("this build of jtypeset has no MicroTeX handler")
+                self.registry = None
+                return
+            from .. import microtex_res_dir
+            res = str(m.get("res_dir", "")) or microtex_res_dir()
+            body = self.opts.font_body[0] if self.opts.font_body else "serif"
+            sans = self.opts.font_heading[0] if self.opts.font_heading else "sans"
+            self.registry.add_microtex("tex", self.fonts, body, sans, res)
+        elif handler == "command":
             cmd = m.get("command")
             if not cmd:
                 self.warnings.append("math.handler=command needs math.command")

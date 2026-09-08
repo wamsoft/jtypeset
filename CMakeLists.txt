@@ -20,7 +20,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(TYPESET_BUILD_SAMPLES "Build sample executables" ${PROJECT_IS_TOP_LEVEL})
 option(TYPESET_BUILD_TESTS "Build unit tests (doctest)" ${PROJECT_IS_TOP_LEVEL})
 option(TYPESET_BUILD_PYTHON "Build pybind11 Python bindings" OFF)
-option(TYPESET_HANDLER_MICROTEX "Build the MicroTeX (LaTeX math) object handler and its sample (needs tinyxml2: vcpkg feature microtex)" OFF)
+option(TYPESET_HANDLER_MICROTEX "Build the MicroTeX (LaTeX math) object handler (default ON; tinyxml2 from vcpkg, MicroTeX via FetchContent)" ON)
 
 if(TYPESET_BUILD_PYTHON)
     # 拡張モジュールに静的ライブラリをリンクするので全部 PIC にする

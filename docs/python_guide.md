@@ -92,12 +92,14 @@ pybind の `std::vector` 属性（`rows`, `cells`, `items`, `columns`, `runs` �
 
 ```python
 reg = ts.ObjectRegistry()
+reg.add_microtex("tex", fonts, text_family="serif-ja")       # 同梱の MicroTeX で LaTeX 数式（ts.HAS_MICROTEX が True のビルド）
 reg.add_command("plot", "python samples/handlers/plot.py")   # 要求 JSON → 標準出力の SVG
 def bars(req):                                               # Python 関数でも可
     return {"svg": "<svg ...>", "baseline": 20.0}
 reg.add("bars", bars)
 
-p.add_object("bars", "3,5,2", body, {"width": "60"})         # 行内（ベースライン揃え）
+p.add_object("tex", r"rac{a}{b}", body)                    # 行内の数式（ベースライン揃え）
+p.add_object("bars", "3,5,2", body, {"width": "60"})         # 行内のグラフ
 flow.add_object(ts.ObjectBlock("plot", "sin,cos", body, {"width": "300"}, numbered=True))   # 別行立て＋式番号
 pages = ts.FlowLayouter(fonts).layout(flow, seq, objects=reg)
 print(reg.errors)                                            # 失敗したハンドラ（本文には代替テキスト）

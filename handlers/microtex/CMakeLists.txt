@@ -37,6 +37,9 @@ else()
     target_compile_options(microtex_core PRIVATE -w)
 endif()
 
+# Python パッケージなどが res（数式フォント）を同梱できるように場所を公開する
+set(TYPESET_MICROTEX_RES_DIR "${microtex_SOURCE_DIR}/res" CACHE INTERNAL "MicroTeX res directory")
+
 add_library(typeset_microtex STATIC microtex_handler.cpp)
 target_include_directories(typeset_microtex PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(typeset_microtex PUBLIC typeset microtex_core)

@@ -8,8 +8,7 @@ size: 10.5
 toc: true
 numbering: true
 footer: "{page} / {pages}"
-math:
-  handler: mathtext
+# math: 既定は auto（MicroTeX 入りのビルドなら LaTeX 数式をそのまま組む）。mathtext / command / none も選べる
 ---
 
 # はじめに {#sec-intro}
@@ -29,7 +28,7 @@ math:
 - ルビは青空文庫記法 ｜組版《くみはん》 か、漢字《かんじ》 に直接 《》 を付ける
     - 入れ子の箇条書きは字下げして続く
     - もう一つの項目
-- 数式は `$…$` と `$$…$$`。ハンドラは front matter の `math` で選ぶ（matplotlib の mathtext か外部コマンド）
+- 数式は `$…$` と `$$…$$`。既定で MicroTeX（LaTeX 数式）が組む。front matter の `math` で mathtext や外部コマンドにも切り替えられる
 
 1. 番号付きの箇条書き
 2. 二つ目。文章が長くなって折り返すときも、二行目以降は番号のぶんだけ下がった位置から始まるので読みやすい。
@@ -73,7 +72,13 @@ $$
 \int_{-\infty}^{\infty} e^{-x^2}\,dx = \sqrt{\pi}
 $$ (eq-gauss)
 
-式 {ref:eq-gauss} のように参照できる。数式ハンドラが無い環境では代替テキストが出るだけで、組版は止まらない。
+式 {ref:eq-gauss} のように参照できる。数式は MicroTeX が組み、数式フォントのグリフとして PDF に埋め込まれる。ハンドラが無い環境では代替テキストが出るだけで、組版は止まらない。
+
+行列や場合分けもそのまま書ける:
+
+$$
+\begin{pmatrix} a & b \\ c & d \end{pmatrix} \begin{pmatrix} x \\ y \end{pmatrix} = \begin{pmatrix} ax+by \\ cx+dy \end{pmatrix}, \qquad f(x)=\begin{cases} x^2 & (x\ge 0) \\ -x & (x<0) \end{cases}
+$$
 
 > 引用は背景を付けて段落ごとに置く。長い引用でも段またぎは通常の段落と同じ扱い。
 

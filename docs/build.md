@@ -38,7 +38,7 @@ cmake --build build/x64-windows --config Release
 | `TYPESET_BUILD_SAMPLES` | ON（トップレベルのとき） | `samples/` の実行ファイル |
 | `TYPESET_BUILD_TESTS` | ON（トップレベルのとき） | doctest |
 | `TYPESET_BUILD_PYTHON` | OFF | pybind11 モジュール `jtypeset._jtypeset`。`python/<Config>/jtypeset/` にパッケージがまとまる |
-| `TYPESET_HANDLER_MICROTEX` | OFF | MicroTeX（LaTeX 数式）ハンドラとサンプル。`-DVCPKG_MANIFEST_FEATURES=microtex` で tinyxml2 を入れる |
+| `TYPESET_HANDLER_MICROTEX` | ON | MicroTeX（LaTeX 数式）ハンドラとサンプル。MicroTeX は FetchContent、tinyxml2 は vcpkg。Python 拡張にもリンクされ、数式フォント（res、2MB）がパッケージに同梱される |
 | `GLYPHWARE_DIR` | 空 | glyphware のローカルツリー。空なら FetchContent |
 
 ## Python パッケージ（jtypeset）

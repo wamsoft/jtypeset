@@ -8,7 +8,7 @@
 ```bash
 pip install "jtypeset[md]"            # markdown-it-py / mdit-py-plugins / PyYAML
 pip install "jtypeset[md,highlight]"  # + Pygments（コードブロックの色付け。無くても単色で組める）
-pip install matplotlib                # 任意: 数式を matplotlib の mathtext で組むとき
+pip install matplotlib                # 任意: 数式を MicroTeX でなく matplotlib の mathtext で組むとき
 ```
 
 確認:
@@ -101,7 +101,7 @@ header: "{title}"         # 柱。null で無し
 footer: "{page} / {pages}"
 links: footnote           # footnote / inline / none
 math:
-  handler: mathtext       # または handler: command, command: "python render_math.py"
+  handler: auto           # auto（MicroTeX があれば使う）/ microtex / mathtext / command（command: "..."）/ none
 highlight: true           # コードブロックの色付け（Pygments）
 highlight-style: default  # Pygments のスタイル名
 tab-width: 4
@@ -212,13 +212,17 @@ $$ (eq-gauss)
 式 {ref:eq-gauss} を参照。
 ```
 
-数式を組むにはハンドラが要ります（無ければ `[tex]` の代替テキストになるだけで、組版は止まりません）。
+既定では同梱の **MicroTeX**（LaTeX 数式のレンダラ）が組み、数式のグリフは数式フォント（Computer Modern 系）として PDF に埋め込まれます。
+分数・根号・積分・総和・行列（`pmatrix`）・場合分け（`cases`）・ギリシャ文字・`\mathbf` `	ext{}` などが使えます。
+`math` でハンドラを切り替えられます（無い環境では `[tex]` の代替テキストになるだけで、組版は止まりません）。
 
+- `math: {handler: auto}`（既定）— MicroTeX があればそれ、無ければ何もしない
+- `math: {handler: microtex}` — 同梱の MicroTeX。`res_dir` で数式フォントの場所を差し替え可
 - `math: {handler: mathtext}` — matplotlib の mathtext（`pip install matplotlib`）。TeX のサブセット
 - `math: {handler: command, command: "..."}` — 外部コマンド。要求（JSON ファイル）を引数に受け、SVG を標準出力に書く。
   MathJax / dvisvgm / Typst など、SVG を吐けるものなら何でも接続できます。要求の形式とベースラインの伝え方は
   [Python ガイド](python_guide.md) の「外部オブジェクト」を参照
-- C++ からなら `handlers/microtex/`（MicroTeX）で LaTeX 数式をフォントのグリフとして埋め込めます
+- `math: {handler: none}` — 数式を組まない
 
 ### ルビ・縦組み向けの記法
 

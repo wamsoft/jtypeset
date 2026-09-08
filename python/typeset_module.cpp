@@ -22,6 +22,9 @@
 #include "typeset/inl/paragraph.hpp"
 #include "typeset/obj/object.hpp"
 #include "typeset/obj/svg_import.hpp"
+#ifdef TYPESET_HAS_MICROTEX
+#include "microtex_handler.hpp"
+#endif
 #include "typeset/text/utf.hpp"
 #include "typeset/page/flow_layouter.hpp"
 #include "typeset/page/page.hpp"
@@ -575,6 +578,22 @@ Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
              py::arg("name"), py::arg("fn"))
         .def("add_command", &obj::ObjectRegistry::addCommand, py::arg("name"), py::arg("command"),
              py::arg("workdir") = std::string())
+#ifdef TYPESET_HAS_MICROTEX
+        .def("add_microtex",
+             [](obj::ObjectRegistry& reg, const std::string& name, font::FontSet& fonts, std::string textFamily,
+                std::string sansFamily, std::string resDir) {
+                 handlers::MicroTexOptions mo;
+                 mo.textFamily = std::move(textFamily);
+                 mo.sansFamily = std::move(sansFamily);
+                 mo.resDir = std::move(resDir);
+                 reg.add(name, handlers::makeMicroTexHandler(fonts, mo));
+             },
+             py::arg("name"), py::arg("fonts"), py::arg("text_family") = std::string("serif"),
+             py::arg("sans_family") = std::string("sans"), py::arg("res_dir") = std::string(),
+             py::keep_alive<1, 3>(),
+             "MicroTeX（LaTeX 数式）をハンドラとして登録する。res_dir は数式フォントの場所（省略時はパッケージ同梱の "
+             "microtex_res。jtypeset.microtex_res_dir()）。\\text{} などは text_family / sans_family の FontSet キーで組む")
+#endif
         .def("has", &obj::ObjectRegistry::has, py::arg("name"))
         .def("clear_cache", &obj::ObjectRegistry::clearCache)
         .def_property_readonly("cache_size", &obj::ObjectRegistry::cacheSize)
@@ -614,6 +633,11 @@ Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
              "Flow をページ列へ流し込む。fields は柱・ノンブル・本文の {name} 置換");
 
     m.def("superscript_style", &inl::superscriptStyle, py::arg("style"), "上付き（脚注記号・指数用）のスタイルを作る");
+#ifdef TYPESET_HAS_MICROTEX
+    m.attr("HAS_MICROTEX") = true;
+#else
+    m.attr("HAS_MICROTEX") = false;
+#endif
 
     m.def("save_pdf",
           [](const std::vector<page::Page>& pages, const std::string& path, const std::string& title,

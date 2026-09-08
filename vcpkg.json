@@ -17,14 +17,7 @@
     "libunibreak",
     "zlib",
     "stb",
-    "doctest"
-  ],
-  "features": {
-    "microtex": {
-      "description": "MicroTeX handler sample (LaTeX math objects)",
-      "dependencies": [
-        "tinyxml2"
-      ]
-    }
-  }
+    "doctest",
+    "tinyxml2"
+  ]
 }

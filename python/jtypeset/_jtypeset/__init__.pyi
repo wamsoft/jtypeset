@@ -12,7 +12,7 @@ from __future__ import annotations
 import collections.abc
 import typing
 from . import paper
-__all__: list[str] = ['Align', 'Annotation', 'BlockStyle', 'BreakKind', 'BreakOptions', 'CM', 'Color', 'EmphasisMark', 'Flow', 'FlowLayouter', 'FontSet', 'FontSpec', 'INCH', 'Image', 'ImageBlock', 'ImagePlacement', 'IndexBlock', 'InlineRun', 'LineBreakStrategy', 'LineInfo', 'ListBlock', 'ListMarker', 'MM', 'Margins', 'ObjectBlock', 'ObjectRegistry', 'ObjectResult', 'Page', 'PageMaster', 'PageSequence', 'Paragraph', 'ParagraphStyle', 'Point', 'Rect', 'RubyMode', 'RunningText', 'Size', 'SpacingOptions', 'Stroke', 'TableBlock', 'TableBorders', 'TableCell', 'TableColumn', 'TableRow', 'TextOrientation', 'TextStyle', 'TocBlock', 'VAlign', 'WritingMode', 'image_from_rgba', 'layout_paragraph', 'load_image', 'paper', 'save_pdf', 'superscript_style']
+__all__: list[str] = ['Align', 'Annotation', 'BlockStyle', 'BreakKind', 'BreakOptions', 'CM', 'Color', 'EmphasisMark', 'Flow', 'FlowLayouter', 'FontSet', 'FontSpec', 'HAS_MICROTEX', 'INCH', 'Image', 'ImageBlock', 'ImagePlacement', 'IndexBlock', 'InlineRun', 'LineBreakStrategy', 'LineInfo', 'ListBlock', 'ListMarker', 'MM', 'Margins', 'ObjectBlock', 'ObjectRegistry', 'ObjectResult', 'Page', 'PageMaster', 'PageSequence', 'Paragraph', 'ParagraphStyle', 'Point', 'Rect', 'RubyMode', 'RunningText', 'Size', 'SpacingOptions', 'Stroke', 'TableBlock', 'TableBorders', 'TableCell', 'TableColumn', 'TableRow', 'TextOrientation', 'TextStyle', 'TocBlock', 'VAlign', 'WritingMode', 'image_from_rgba', 'layout_paragraph', 'load_image', 'paper', 'save_pdf', 'superscript_style']
 class Align:
     """
     Members:
@@ -679,6 +679,10 @@ class ObjectRegistry:
         ...
     def add_command(self, name: str, command: str, workdir: str = '') -> None:
         ...
+    def add_microtex(self, name: str, fonts: FontSet, text_family: str = 'serif', sans_family: str = 'sans', res_dir: str = '') -> None:
+        """
+        MicroTeX（LaTeX 数式）をハンドラとして登録する。res_dir は数式フォントの場所（省略時はパッケージ同梱の microtex_res。jtypeset.microtex_res_dir()）。\\text{} などは text_family / sans_family の FontSet キーで組む
+        """
     def clear_cache(self) -> None:
         ...
     def has(self, name: str) -> bool:
@@ -1358,5 +1362,6 @@ def superscript_style(style: TextStyle) -> TextStyle:
     上付き（脚注記号・指数用）のスタイルを作る
     """
 CM: float = 28.346458435058594
+HAS_MICROTEX: bool = True
 INCH: float = 72.0
 MM: float = 2.8346457481384277

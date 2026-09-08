@@ -18,3 +18,9 @@ __all__.append("md")
 del _name
 
 __version__ = "0.1.0"
+
+
+def microtex_res_dir() -> str:
+    """パッケージに同梱した MicroTeX の数式フォント（res）の場所。ObjectRegistry.add_microtex の res_dir に渡す"""
+    import os
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "microtex_res")

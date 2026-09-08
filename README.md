@@ -8,7 +8,7 @@ C++17 ライブラリです。Python パッケージ **jtypeset** から使え�
 - ルビ（グループ／モノ／熟語）・縦中横・圏点・割注・字取り
 - 見出しの採番と PDF のしおり、目次、索引、図表番号と相互参照、脚注、箇条書き、コードブロック、表（ページまたぎ・rowspan）、
   画像の回り込み、段組と段抜き、柱・ノンブル
-- 数式やグラフなど外部レンダラの出力（SVG）を行内・別行立てに差し込む口（LaTeX 数式は MicroTeX のサンプルあり）
+- LaTeX 数式（同梱の MicroTeX。数式フォントのグリフとして PDF に埋め込む）と、グラフなど外部レンダラの出力（SVG）の差し込み
 - フォントはファイルから直接読み、PDF にはサブセットで埋め込む（埋め込み許可 fsType を確認）
 
 想定している用途は台本・小説・技術文書・レポートなどのツール作りです。詳しい説明は
@@ -97,7 +97,7 @@ make test                                       # ctest（doctest）
 - Python バインディングも一緒にビルド: `make prebuild CMAKEOPT=-DTYPESET_BUILD_PYTHON=ON`（`pip install pybind11` が必要）。
   ビルドツリーの `build/<preset>/python/Release` を `PYTHONPATH` に足すと `import jtypeset` できます
 - wheel: `pip wheel . -w dist --no-deps`（scikit-build-core。`VCPKG_ROOT` があれば toolchain は自動で補います）
-- MicroTeX（LaTeX 数式）ハンドラ: `make prebuild CMAKEOPT="-DTYPESET_HANDLER_MICROTEX=ON -DVCPKG_MANIFEST_FEATURES=microtex"`
+- MicroTeX（LaTeX 数式）は既定でビルドされ Python 拡張にも入る（`-DTYPESET_HANDLER_MICROTEX=OFF` で外せる）
 - リファレンス: `make docs`（Doxygen）、`make pydocs`（型スタブ＋ pdoc）、`make site`（MkDocs でドキュメントサイトを `build/site` に）
 
 サンプル: `sample_inline`（縦横同一文）、`sample_script`（台本）、`sample_novel`（小説 2 段）、`sample_tech`（技術文書）、
