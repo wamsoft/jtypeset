@@ -1537,7 +1537,18 @@ std::vector<Flower::FootnoteAt> Flower::numberFootnotes(inl::Paragraph& para, si
         for (inl::InlineRun& r : para.runs) {
             if (r.footnote) {
                 ++n;
-                r.text = format(opts_.footnoteMarkerFormat, n);
+                const std::u16string marker = format(opts_.footnoteMarkerFormat, n);
+                // 記号の長さが変わるぶん、後ろの注記（ルビ等）の位置をずらす
+                const ptrdiff_t delta = static_cast<ptrdiff_t>(marker.size()) - static_cast<ptrdiff_t>(r.text.size());
+                if (delta != 0) {
+                    for (inl::Annotation& a : para.annotations) {
+                        if (a.start >= pos + r.text.size()) {
+                            a.start = static_cast<size_t>(static_cast<ptrdiff_t>(a.start) + delta);
+                            a.end = static_cast<size_t>(static_cast<ptrdiff_t>(a.end) + delta);
+                        }
+                    }
+                }
+                r.text = marker;
                 FootnoteAt fa;
                 fa.charIndex = pos;
                 fa.note = resolved(*r.footnote);
