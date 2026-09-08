@@ -580,7 +580,7 @@ PYBIND11_MODULE(_typeset, m) {
                 std::map<std::u16string, std::u16string> fields, bool drawGuides, bool balanceLastPage,
                 std::u16string figureFormat, std::u16string tableFormat, std::u16string equationFormat,
                 obj::ObjectRegistry* objects, std::u16string footnoteMarkerFormat,
-                std::u16string footnoteLabelFormat) {
+                std::u16string footnoteLabelFormat, bool footnotePerPage) {
                  page::FlowLayoutOptions o;
                  o.fields = std::move(fields);
                  o.drawGuides = drawGuides;
@@ -591,6 +591,7 @@ PYBIND11_MODULE(_typeset, m) {
                  o.objects = objects;
                  o.footnoteMarkerFormat = std::move(footnoteMarkerFormat);
                  o.footnoteLabelFormat = std::move(footnoteLabelFormat);
+                 o.footnotePerPage = footnotePerPage;
                  return l.layout(flow, seq, o);
              },
              py::arg("flow"), py::arg("sequence"),
@@ -602,6 +603,7 @@ PYBIND11_MODULE(_typeset, m) {
              py::arg("objects") = nullptr,
              py::arg("footnote_marker_format") = std::u16string(u"{n}"),
              py::arg("footnote_label_format") = std::u16string(u"{n} "),
+             py::arg("footnote_per_page") = false,
              "Flow をページ列へ流し込む。fields は柱・ノンブル・本文の {name} 置換");
 
     m.def("superscript_style", &inl::superscriptStyle, py::arg("style"), "上付き（脚注記号・指数用）のスタイルを作る");

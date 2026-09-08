@@ -40,6 +40,8 @@ struct FlowLayoutOptions {
     /// 脚注: 本文中の記号と注の頭の書式（`{n}` が番号。文書を通して連番）
     std::u16string footnoteMarkerFormat = u"{n}";
     std::u16string footnoteLabelFormat = u"{n} ";
+    /// 脚注の番号をページごとに 1 から振り直す（false なら文書を通して連番）
+    bool footnotePerPage = false;
     /// 脚注: 本文との間（罫の上）、罫の長さ（行長に対する比）と太さ、罫と注の間
     Pt footnoteGap = 6.0f;
     float footnoteRuleLength = 0.3f;

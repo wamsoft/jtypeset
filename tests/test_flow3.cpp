@@ -906,3 +906,80 @@ TEST_CASE("FlowLayouter: a rowspan group taller than the page is split, header r
     CHECK(tsugi == 1);
     CHECK(kyou == 1);            // rowspan セルの内容は 1 回
 }
+
+TEST_CASE("FlowLayouter: per-page footnote numbering restarts, also for a paragraph split across pages") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+
+    page::PageSequence seq;
+    seq.master.size = Size{300, 200};
+    seq.master.margin = page::Margins{20, 20, 20, 20};
+    seq.master.writingMode = WritingMode::HorizontalTb;
+    const TextStyle body = fx.style(10.0f);
+    const TextStyle noteStyle = fx.style(8.0f);
+    const TextStyle marker = inl::superscriptStyle(body);
+
+    block::Flow flow;
+    // 1 ページ目: 脚注 2 つ
+    inl::Paragraph p1;
+    p1.runs.push_back(inl::InlineRun{u"最初の注", body});
+    p1.addFootnote(inl::Paragraph::plain(u"注の本文。", noteStyle), marker);
+    p1.runs.push_back(inl::InlineRun{u"と次の注", body});
+    p1.addFootnote(inl::Paragraph::plain(u"注の本文。", noteStyle), marker);
+    p1.runs.push_back(inl::InlineRun{u"。", body});
+    flow.addParagraph(p1);
+    for (int i = 0; i < 3; ++i) flow.addParagraph(inl::Paragraph::plain(u"埋め草。埋め草。埋め草。埋め草。埋め草。", body));
+    // ページをまたぐ段落: 前半に 1 つ、後半（次のページ）に 1 つ
+    inl::Paragraph p2;
+    p2.runs.push_back(inl::InlineRun{u"またぐ段落の前半", body});
+    p2.addFootnote(inl::Paragraph::plain(u"注の本文。", noteStyle), marker);
+    std::u16string filler;
+    for (int i = 0; i < 12; ++i) filler += u"長い文章が続いて次のページへ渡る。";
+    p2.runs.push_back(inl::InlineRun{filler, body});
+    p2.addFootnote(inl::Paragraph::plain(u"注の本文。", noteStyle), marker);
+    p2.runs.push_back(inl::InlineRun{u"おわり。", body});
+    block::BlockStyle ps;
+    ps.orphans = 1;
+    ps.widows = 1;
+    flow.addParagraph(p2, ps);
+
+    page::FlowLayoutOptions opts;
+    opts.footnotePerPage = true;
+    page::FlowLayouter layouter(fx.fonts);
+    const auto pages = layouter.layout(flow, seq, opts);
+    REQUIRE(pages.size() >= 2);
+
+    // 注（8pt）の番号: 1 ページ目は 1, 2, 3、2 ページ目は 1 から
+    auto labels = [&](const page::Page& pg) {
+        std::vector<int> nums;
+        const uint32_t g1 = fx.jp->glyphIndex(U'1'), g2 = fx.jp->glyphIndex(U'2'),
+                       g3 = fx.jp->glyphIndex(U'3'), g4 = fx.jp->glyphIndex(U'4');
+        for (const dl::Item& item : pg.dl.items) {
+            if (const auto* run = std::get_if<dl::GlyphRun>(&item)) {
+                if (run->size != doctest::Approx(8.0f)) continue;
+                for (const dl::Glyph& g : run->glyphs) {
+                    if (g.gid == g1) nums.push_back(1);
+                    else if (g.gid == g2) nums.push_back(2);
+                    else if (g.gid == g3) nums.push_back(3);
+                    else if (g.gid == g4) nums.push_back(4);
+                }
+            }
+        }
+        return nums;
+    };
+    CHECK(labels(pages[0]) == std::vector<int>{1, 2, 3});
+    CHECK(labels(pages[1]) == std::vector<int>{1});
+    // 本文側の記号（6pt）も 2 ページ目は "1" だけ
+    int marker1 = 0, marker4 = 0;
+    for (const dl::Item& item : pages[1].dl.items) {
+        if (const auto* run = std::get_if<dl::GlyphRun>(&item)) {
+            if (run->size != doctest::Approx(6.0f)) continue;
+            for (const dl::Glyph& g : run->glyphs) {
+                if (g.gid == fx.jp->glyphIndex(U'1')) ++marker1;
+                if (g.gid == fx.jp->glyphIndex(U'4')) ++marker4;
+            }
+        }
+    }
+    CHECK(marker1 == 1);
+    CHECK(marker4 == 0);
+}

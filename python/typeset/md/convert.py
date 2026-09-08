@@ -86,6 +86,7 @@ class Options:
     equation_format: str = "({n})"
     footnote_marker_format: str = "{n}"
     footnote_label_format: str = "{n} "
+    footnote_per_page: bool = False   # 脚注の番号をページごとに 1 から
     title_page: bool = False          # 表題を独立したページに
     highlight: bool = True            # コードブロックの色付け（Pygments があれば。fence の言語名で判定）
     highlight_style: str = "default"  # Pygments のスタイル名
@@ -884,7 +885,8 @@ class Converter:
             self.flow, self.page_sequence(), fields=fields, draw_guides=o.draw_guides,
             balance_last_page=o.balance_last_page, figure_format=o.figure_format, table_format=o.table_format,
             equation_format=o.equation_format, objects=self.registry,
-            footnote_marker_format=o.footnote_marker_format, footnote_label_format=o.footnote_label_format)
+            footnote_marker_format=o.footnote_marker_format, footnote_label_format=o.footnote_label_format,
+            footnote_per_page=o.footnote_per_page)
         if self.registry is not None:
             self.warnings.extend(self.registry.errors)
         return pages

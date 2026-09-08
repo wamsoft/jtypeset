@@ -415,6 +415,8 @@ private:
                                          size_t charStart, int maxLines, Pt available);
     /// 脚注の記号を番号にし、注の一覧（本文中の位置付き）を返す。charStart0 より前の脚注は前の段で数え済み
     std::vector<FootnoteAt> numberFootnotes(inl::Paragraph& para, size_t charStart0);
+    /// fromChar 以降の脚注を、いまのカウンタから振り直す（ページごとの番号で、段落の続きが次のページへ移ったとき）
+    void renumberFootnotes(inl::Paragraph& para, std::vector<FootnoteAt>& notes, size_t fromChar);
     /// 断片 [charStart, charEnd) に載る脚注に要る段末の量（罫を含む）
     Pt footnoteExtent(const std::vector<FootnoteAt>& notes, size_t charStart, size_t charEnd,
                       const Region& reg, std::vector<const FootnoteAt*>* picked = nullptr);
@@ -430,6 +432,7 @@ private:
 void Flower::newPage() {
     if (pendingColumns_) { columns_ = *pendingColumns_; pendingColumns_.reset(); }
     if (pendingGap_) { columnGap_ = *pendingGap_; pendingGap_.reset(); }
+    if (opts_.footnotePerPage) footnoteCount_ = 0;
 
     Page p;
     p.number = seq_.firstPageNumber + static_cast<int>(pages_.size());
@@ -1876,6 +1879,40 @@ std::vector<Flower::FootnoteAt> Flower::numberFootnotes(inl::Paragraph& para, si
     return out;
 }
 
+void Flower::renumberFootnotes(inl::Paragraph& para, std::vector<FootnoteAt>& notes, size_t fromChar) {
+    auto format = [&](const std::u16string& fmt, int n) {
+        return substitute(inl::Paragraph::plain(fmt, TextStyle{}), {{u"n", toU16(n)}}).text();
+    };
+    int n = footnoteCount_;
+    size_t pos = 0;
+    size_t k = 0;
+    ptrdiff_t shift = 0;   // 記号の長さの変化の累積（後ろの位置に足す）
+    for (inl::InlineRun& r : para.runs) {
+        if (r.footnote && k < notes.size()) {
+            FootnoteAt& fa = notes[k++];
+            fa.charIndex = static_cast<size_t>(static_cast<ptrdiff_t>(fa.charIndex) + shift);
+            if (fa.charIndex >= fromChar) {
+                ++n;
+                const std::u16string marker = format(opts_.footnoteMarkerFormat, n);
+                const ptrdiff_t delta = static_cast<ptrdiff_t>(marker.size()) - static_cast<ptrdiff_t>(r.text.size());
+                if (delta != 0) {
+                    for (inl::Annotation& a : para.annotations) {
+                        if (a.start >= pos + r.text.size()) {
+                            a.start = static_cast<size_t>(static_cast<ptrdiff_t>(a.start) + delta);
+                            a.end = static_cast<size_t>(static_cast<ptrdiff_t>(a.end) + delta);
+                        }
+                    }
+                }
+                r.text = marker;
+                if (!fa.note.runs.empty()) fa.note.runs.front().text = format(opts_.footnoteLabelFormat, n);
+                shift += delta;
+            }
+        }
+        pos += r.text.size();
+    }
+    footnoteCount_ = n;
+}
+
 Pt Flower::footnoteExtent(const std::vector<FootnoteAt>& notes, size_t charStart, size_t charEnd,
                           const Region& reg, std::vector<const FootnoteAt*>* picked) {
     Pt total = 0.0f;
@@ -1935,7 +1972,8 @@ void Flower::flowParagraph(const inl::Paragraph& paraIn, const block::BlockStyle
                            const inl::Paragraph* labelIn, Pt labelWidth, Pt labelGap,
                            bool firstOfBlock, size_t charStart0, bool labelPlaced0) {
     inl::Paragraph para = resolved(paraIn);
-    const std::vector<FootnoteAt> footnotes = numberFootnotes(para, charStart0);
+    std::vector<FootnoteAt> footnotes = numberFootnotes(para, charStart0);
+    int footnotePage = pages_.empty() ? 0 : page().number;
     std::optional<inl::Paragraph> labelResolved;
     if (labelIn) labelResolved = resolved(*labelIn);
     const inl::Paragraph* label = labelResolved ? &*labelResolved : nullptr;
@@ -1957,6 +1995,11 @@ void Flower::flowParagraph(const inl::Paragraph& paraIn, const block::BlockStyle
         Region& reg = region();
 
         bool forceHere = false;   // 巻き取った先が空のページなら、ここに置くしかない
+        if (opts_.footnotePerPage && !footnotes.empty() && page().number != footnotePage) {
+            // ページが変わった: この先に載る脚注は新しいページの番号で
+            renumberFootnotes(para, footnotes, charStart);
+            footnotePage = page().number;
+        }
         auto moveToNextRegion = [&]() {
             if (charStart == 0 && pending_ && pending_->blk && pending_->regionIndex == regionIndex_) {
                 const Pending pend = *pending_;
