@@ -327,3 +327,75 @@ TEST_CASE("preserveSpaces expands tabs to tab stops") {
     CHECK(xc > 12.0f);
     CHECK(xd > xb);   // 8 桁は 4 桁より右
 }
+
+TEST_CASE("emoji: color layers are emitted as filled paths and ZWJ sequences stay together in vertical text") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+    // カラー絵文字フォント（Windows の Segoe UI Emoji）があるときだけ
+    auto emoji = fx.fonts.loadFile("C:/Windows/Fonts/seguiemj.ttf", "emoji");
+    if (!emoji) { MESSAGE("no color emoji font; skipping"); return; }
+    REQUIRE(emoji->descriptor().color);
+
+    TextStyle st = fx.style(14.0f);
+    st.font.family = {"serif-ja", "emoji"};
+    inl::ParagraphLayouter layouter(fx.fonts);
+    const inl::ConstantLineShape shape(300.0f);
+
+    // 横組み: 😀 はカラーレイヤ（塗り付きの PathItem、黒以外の色を含む）として出る
+    {
+        inl::Paragraph p = inl::Paragraph::plain(u"あ😀い", st);
+        const inl::ParagraphFragment frag = layouter.layout(p, WritingMode::HorizontalTb, shape);
+        REQUIRE(frag.lines.size() == 1);
+        dl::DisplayList out;
+        inl::emitParagraph(out, frag, WritingMode::HorizontalTb, Point{0, 20});
+        int colored = 0, glyphRuns = 0;
+        for (const dl::Item& item : out.items) {
+            if (const auto* pi = std::get_if<dl::PathItem>(&item)) {
+                if (pi->fill && (pi->fill->r != pi->fill->g || pi->fill->g != pi->fill->b)) ++colored;
+            } else if (std::get_if<dl::GlyphRun>(&item)) {
+                ++glyphRuns;
+            }
+        }
+        CHECK(colored >= 1);      // 黄色い顔など
+        CHECK(glyphRuns >= 1);    // 「あ」「い」は通常のグリフ
+    }
+    // 縦組み: 👨‍👩‍👧（ZWJ シーケンス）が 1 つのクラスタになり、正立で置かれる
+    {
+        inl::Paragraph p = inl::Paragraph::plain(u"あ👨\u200D👩\u200D👧い", st);
+        const inl::ParagraphFragment frag = layouter.layout(p, WritingMode::VerticalRl, shape);
+        REQUIRE(frag.lines.size() == 1);
+        // 絵文字フォントのグリフは 1 クラスタにまとまり（フォントによっては合成の複数グリフ）、列方向には 1 つぶんしか進まない。
+        // 「い」の位置は「あ」＋絵文字 1 つぶん（アセント＋ディセント）の先
+        float emojiMinInline = 1e9f, emojiMaxInline = -1e9f, iInline = -1.0f, aInline = -1.0f;
+        int emojiClusters = 0;
+        uint32_t lastChar = 9999;
+        for (const inl::PlacedGlyph& g : frag.lines[0].glyphs) {
+            if (g.face == emoji) {
+                emojiMinInline = std::min(emojiMinInline, g.inline_);
+                emojiMaxInline = std::max(emojiMaxInline, g.inline_);
+                if (g.charIndex != lastChar) { ++emojiClusters; lastChar = g.charIndex; }
+            } else if (g.charIndex == 0) {
+                aInline = g.inline_;
+            } else {
+                iInline = g.inline_;
+            }
+        }
+        CHECK(emojiClusters == 1);
+        CHECK(emojiMaxInline - emojiMinInline < 1.0f);       // 合成グリフは同じ行位置（横に並ぶ）
+        CHECK(iInline > aInline + 14.0f);                    // 「い」は「あ」より 1 字＋絵文字ぶん先
+        CHECK(iInline < aInline + 14.0f * 3.0f);             // 3 つ縦に並んだら 4 字ぶん先になる
+    }
+    // 国旗（Regional Indicator の対）も 1 クラスタで正立（Segoe では "JP" の字形になるが、向きと結合を見る）
+    {
+        inl::Paragraph p = inl::Paragraph::plain(u"あ🇯🇵い", st);
+        const inl::ParagraphFragment frag = layouter.layout(p, WritingMode::VerticalRl, shape);
+        REQUIRE(frag.lines.size() == 1);
+        int emojiGlyphs = 0;
+        bool upright = true;
+        for (const inl::PlacedGlyph& g : frag.lines[0].glyphs) {
+            if (g.face == emoji) { ++emojiGlyphs; if (!g.xform.isIdentity()) upright = false; }
+        }
+        CHECK(emojiGlyphs >= 1);
+        CHECK(upright);
+    }
+}

@@ -24,6 +24,13 @@ struct Segment {
     uint32_t styleIndex = 0;
 };
 
+/// 絵文字の結合要素（ZWJ・異体字セレクタ・肌色修飾子・タグ・キーキャップ）。前の文字と同じ face・向きで
+/// 同じセグメントに入れないと、HarfBuzz が結合（ZWJ シーケンス・国旗・肌色）を作れない
+bool isEmojiExtender(char32_t cp) {
+    return cp == 0x200D || cp == 0xFE0E || cp == 0xFE0F || cp == 0x20E3 ||
+           (cp >= 0x1F3FB && cp <= 0x1F3FF) || (cp >= 0xE0020 && cp <= 0xE007F);
+}
+
 bool resolveUpright(WritingMode wm, TextOrientation ori, char32_t cp) {
     if (!isVertical(wm)) return true;
     switch (ori) {
@@ -45,6 +52,12 @@ std::vector<Segment> itemize(const std::u16string& text, const std::vector<Style
         for (size_t i = run.start; i < end;) {
             size_t len = 1;
             const char32_t cp = text::codePointAt(text, i, len);
+            if (isEmojiExtender(cp) && !segs.empty() && segs.back().end == i &&
+                segs.back().styleIndex == run.styleIndex) {
+                segs.back().end = i + len;   // 前の文字に付ける（face・向きを引き継ぐ）
+                i += len;
+                continue;
+            }
             auto face = ctx.fonts.resolve(style.font, cp);
             const bool upright = resolveUpright(ctx.writingMode, ori, cp);
             if (!segs.empty()) {
@@ -222,8 +235,11 @@ ShapedText shapeText(const std::u16string& text, const std::vector<StyleRun>& ru
                             static_cast<unsigned int>(seg.start),
                             static_cast<int>(seg.end - seg.start));
         hb_buffer_guess_segment_properties(buffer);
-        hb_buffer_set_direction(buffer, (vertical && seg.upright) ? HB_DIRECTION_TTB
-                                                                  : HB_DIRECTION_LTR);
+        // カラー絵文字フォントの正立セグメントは横方向でシェイプする（HarfBuzz は縦方向で ZWJ シーケンスや
+        // 国旗の結合を作れない）。置くときに列の中心へ正立で置く
+        const bool emojiUpright = vertical && seg.upright && seg.face->descriptor().color;
+        hb_buffer_set_direction(buffer, (vertical && seg.upright && !emojiUpright) ? HB_DIRECTION_TTB
+                                                                                   : HB_DIRECTION_LTR);
         if (!style.language.empty()) {
             hb_buffer_set_language(buffer, hb_language_from_string(style.language.c_str(), -1));
         }
@@ -254,6 +270,12 @@ ShapedText shapeText(const std::u16string& text, const std::vector<StyleRun>& ru
             sc.charClass = text::getCharClass(text::codePointAt(text, sc.charStart));
 
             Pt clusterAdvance = 0.0f;
+            // 正立絵文字: クラスタ全体（合成された複数グリフ）を横に並べたまま列の中心へ置く
+            Pt emojiWidth = 0.0f, emojiX = 0.0f, emojiAsc = 0.0f, emojiDesc = 0.0f;
+            if (emojiUpright) {
+                for (unsigned int k = i; k <= j; ++k) emojiWidth += pos[k].x_advance * s * advScale;
+                font::faceAscentDescent(*seg.face, size, emojiAsc, emojiDesc);
+            }
             for (unsigned int k = i; k <= j; ++k) {
                 PlacedGlyph g;
                 g.face = seg.face;
@@ -267,7 +289,14 @@ ShapedText shapeText(const std::u16string& text, const std::vector<StyleRun>& ru
                 const float xo = pos[k].x_offset * s;
                 const float yo = pos[k].y_offset * s;
                 Pt adv;
-                if (vertical && seg.upright) {
+                if (emojiUpright) {
+                    // 横方向のシェイプ結果を正立で置く: クラスタの幅の中心を列の中心に、ベースラインは上端＋アセント。
+                    // 列方向の送りはクラスタで 1 回（アセント＋ディセント = 絵文字の高さ）
+                    g.block = -emojiWidth * 0.5f + emojiX + xo * blockScale;
+                    g.inline_ = pen + emojiAsc - yo * blockScale;
+                    emojiX += pos[k].x_advance * s * advScale;
+                    adv = (k == j) ? (emojiAsc + emojiDesc) : 0.0f;
+                } else if (vertical && seg.upright) {
                     // TTB: HarfBuzz は縦原点を差し引いた offset を返すので、
                     // グリフは水平原点でペン位置に置けばよい。y は上向き正
                     g.block = xo * blockScale;

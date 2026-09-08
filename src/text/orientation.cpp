@@ -19,6 +19,7 @@ struct Range {
 
 constexpr Range kUprightRanges[] = {
     {0x1100, 0x11FF},   // ハングル字母
+    {0x2600, 0x27BF},   // その他の記号・装飾記号（☀☺♨✂ など。UAX #50 ではほぼ U）
     {0x2E80, 0x2EFF},   // CJK 部首補助
     {0x2F00, 0x2FDF},   // 康熙部首
     {0x2FF0, 0x2FFF},   // 漢字構成記述文字
@@ -45,10 +46,12 @@ constexpr Range kUprightRanges[] = {
     {0xFF01, 0xFF60},   // 全角形（半角カタカナ FF61-FF9F は横倒し）
     {0xFFE0, 0xFFE6},   // 全角記号
     {0x1B000, 0x1B16F}, // 仮名補助・仮名拡張
+    {0x1F000, 0x1F1FF}, // 麻雀牌・ドミノ・トランプ・囲み英数字補助（国旗の Regional Indicator を含む）
     {0x1F200, 0x1F2FF}, // 囲み文字補助
     {0x1F300, 0x1F5FF}, // その他の記号と絵文字
     {0x1F600, 0x1F64F}, // 顔文字
     {0x1F680, 0x1F6FF}, // 交通・地図記号
+    {0x1F650, 0x1F67F}, // 装飾記号
     {0x1F900, 0x1F9FF}, // 補助記号と絵文字
     {0x1FA70, 0x1FAFF}, // 記号と絵文字拡張 A
     {0x20000, 0x2FFFD}, // CJK 統合漢字拡張 B〜

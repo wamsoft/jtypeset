@@ -43,6 +43,13 @@ DEFAULT_FONT_CANDIDATES = {
         "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
         "/usr/share/fonts/noto-cjk/NotoSerifCJK-Regular.ttc",
     ],
+    "emoji": [
+        "C:/Windows/Fonts/seguiemj.ttf",
+        "/System/Library/Fonts/Apple Color Emoji.ttc",
+        "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+        "/usr/share/fonts/noto-color-emoji/NotoColorEmoji.ttf",
+        "/usr/share/fonts/google-noto-emoji/NotoColorEmoji.ttf",
+    ],
     "sans": [
         "data/NotoSansJP-Regular.otf",
         "C:/Windows/Fonts/YuGothM.ttc", "C:/Windows/Fonts/meiryo.ttc", "C:/Windows/Fonts/msgothic.ttc",
@@ -199,8 +206,8 @@ class Converter:
                 self.warnings.append(f"font not loaded: {path}")
             else:
                 loaded[key or path] = True
-        # 既定のキー serif / sans が無ければ探す
-        for key in ("serif", "sans"):
+        # 既定のキー serif / sans が無ければ探す。絵文字フォントは見つかれば末尾のフォールバックに足す
+        for key in ("serif", "sans", "emoji"):
             if key in loaded:
                 continue
             for cand in DEFAULT_FONT_CANDIDATES[key]:
@@ -212,6 +219,12 @@ class Converter:
                     break
         if self.fonts.size == 0:
             raise RuntimeError("no font could be loaded: specify fonts in the front matter or --font")
+        if "emoji" in loaded:
+            for attr in ("font_body", "font_heading", "font_mono"):
+                fams = list(getattr(self.opts, attr))
+                if "emoji" not in fams:
+                    fams.append("emoji")
+                    setattr(self.opts, attr, fams)
         if "serif" not in loaded and "sans" in loaded:
             pass  # family 解決は FontSet 側でフォールバックする
 

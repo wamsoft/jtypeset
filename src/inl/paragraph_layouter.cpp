@@ -4,6 +4,8 @@
 
 #include "typeset/inl/paragraph.hpp"
 
+#include "color_glyph.hpp"
+
 #include <algorithm>
 #include <cmath>
 
@@ -411,6 +413,12 @@ void emitParagraph(dl::DisplayList& out, const ParagraphFragment& frag, WritingM
                                                       g.imageSize.h / static_cast<float>(std::max(1, g.image->height))));
                 out.add(item);
                 continue;
+            }
+            // カラーグリフ（絵文字）はレイヤ／ビットマップとして置く（3 backend で同じ色になる）
+            if (g.face && g.face->descriptor().color) {
+                const Point pp = toPhysical(wm, LogicalPoint{g.inline_, g.block}, lo);
+                flush();
+                if (emitColorGlyph(out, *g.face, g.gid, g.size, pp, g.xform)) continue;
             }
             const TextStyle& style = (g.styleIndex < frag.styles.size())
                                          ? frag.styles[g.styleIndex] : frag.styles.front();
