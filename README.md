@@ -96,7 +96,7 @@ pip install dist/typeset-*.whl
 ### Markdown → PDF（`typeset.md`）
 
 ```bash
-pip install "typeset[md]"            # markdown-it-py / mdit-py-plugins / PyYAML
+pip install "typeset[md]"            # markdown-it-py / mdit-py-plugins / PyYAML / Pygments
 typeset-md report.md                 # report.pdf
 typeset-md report.md --vertical --paper A5 --font fonts/mincho.otf --toc
 python -m typeset.md report.md -o out.pdf --png 120 --math mathtext   # 数式は matplotlib の mathtext（任意）
@@ -107,7 +107,8 @@ python -m typeset.md report.md -o out.pdf --png 120 --math mathtext   # 数式�
 （`python/typeset/md/convert.py` の `Options`）。CLI の指定は front matter より優先。
 
 対応する記法: 見出し（採番・PDF しおり・`{#label}` → `{ref:label}` `{page:label}`）、段落（一字下げ・両端揃え）、
-箇条書き／番号付き（入れ子）、コードブロック（背景・空白保持）、表（GFM。直後の「表: 〜」がキャプション）、
+箇条書き／番号付き（入れ子）、コードブロック（背景・空白保持・タブ展開。Pygments があれば言語名で色付け）、
+表（GFM。直後の「表: 〜」がキャプション）、
 画像（単独の段落なら図番号付きの図、文中なら行内画像）、脚注 `[^1]`、引用、水平線、強調・斜体・行内コード、
 リンク（URL は脚注へ）、数式 `$…$` `$$…$$ (label)`、ルビ（`｜漢字《かんじ》` `漢字《かんじ》` `{漢字|かんじ}`）、
 `<!-- pagebreak -->` `<!-- columnbreak -->` `<!-- columns: 2 -->` `[toc]` `[index]`（本文の `{index:よみ|用語}` を集める）。

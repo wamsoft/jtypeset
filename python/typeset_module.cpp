@@ -173,6 +173,7 @@ PYBIND11_MODULE(_typeset, m) {
         .def_readwrite("spacing", &ParagraphStyle::spacing)
         .def_readwrite("line_break", &ParagraphStyle::lineBreak)
         .def_readwrite("preserve_spaces", &ParagraphStyle::preserveSpaces)
+        .def_readwrite("tab_width", &ParagraphStyle::tabWidth)
         .def("copy", [](const ParagraphStyle& s) { return ParagraphStyle(s); });
 
     // ---- 注記・段落 ----

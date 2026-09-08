@@ -87,6 +87,9 @@ class Options:
     footnote_marker_format: str = "{n}"
     footnote_label_format: str = "{n} "
     title_page: bool = False          # 表題を独立したページに
+    highlight: bool = True            # コードブロックの色付け（Pygments があれば。fence の言語名で判定）
+    highlight_style: str = "default"  # Pygments のスタイル名
+    tab_width: int = 4                # コードブロックのタブ幅
     balance_last_page: bool = True
     draw_guides: bool = False
 
@@ -353,7 +356,7 @@ class Converter:
             elif typ in ("bullet_list_open", "ordered_list_open"):
                 i = self._list(tokens, i, 0)
             elif typ in ("fence", "code_block"):
-                self._code(t.content)
+                self._code(t.content, (t.info or "").strip().split(" ")[0] if typ == "fence" else "")
                 i += 1
             elif typ == "table_open":
                 i = self._table(tokens, i)
@@ -507,16 +510,18 @@ class Converter:
         part.items = list(lb.items)[a:b]
         return part
 
-    def _code(self, content: str) -> None:
+    def _code(self, content: str, lang: str = "") -> None:
         text = content.rstrip("\n")
         ps = ts.ParagraphStyle()
         ps.preserve_spaces = True
         ps.align = ts.Align.START
         ps.line_height = 1.45
         ps.first_line_indent = 0.0
+        ps.tab_width = int(self.opts.tab_width)
         p = ts.Paragraph()
         p.style = ps
-        p.add_run(text, self.mono, literal=True)   # コードブロックは {…} を置換しない
+        if not self._highlight(p, text, lang):
+            p.add_run(text, self.mono, literal=True)   # コードブロックは {...} を置換しない
         bs = ts.BlockStyle()
         bs.background = ts.Color(242, 242, 242, 255)
         bs.padding = self.opts.size * 0.6
@@ -524,6 +529,42 @@ class Converter:
         bs.space_before = self.opts.size * 0.4
         bs.space_after = self.opts.size * 0.8
         self.flow.add_paragraph(p, bs)
+
+    def _highlight(self, p: Any, text: str, lang: str) -> bool:
+        """Pygments があれば fence の言語名に応じて色を付ける（opts.highlight が False なら使わない）"""
+        if not self.opts.highlight or not lang:
+            return False
+        try:
+            from pygments import lex  # type: ignore
+            from pygments.lexers import get_lexer_by_name  # type: ignore
+            from pygments.styles import get_style_by_name  # type: ignore
+            from pygments.util import ClassNotFound  # type: ignore
+        except ImportError:
+            return False
+        try:
+            lexer = get_lexer_by_name(lang, stripnl=False, stripall=False)
+            style = get_style_by_name(self.opts.highlight_style)
+        except ClassNotFound:
+            return False
+        tokens = list(lex(text, lexer))
+        # lexer は末尾に改行を足すので落とす
+        while tokens and tokens[-1][1].strip("\n") == "" and tokens[-1][1]:
+            tokens.pop()
+        for ttype, value in tokens:
+            if not value:
+                continue
+            st = self.mono.copy()
+            info = style.style_for_token(ttype)
+            if info.get("color"):
+                c = int(info["color"], 16)
+                st.fill = ts.Color((c >> 16) & 255, (c >> 8) & 255, c & 255, 255)
+            if info.get("bold"):
+                st.fake_bold = True
+                st.font.weight = 700
+            if info.get("italic"):
+                st.fake_italic = True
+            p.add_run(value, st, literal=True)
+        return True
 
     def _table(self, tokens: List[Token], i: int) -> int:
         end = self._close_index(tokens, i, "table_open")

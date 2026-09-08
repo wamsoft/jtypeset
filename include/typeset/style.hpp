@@ -110,6 +110,8 @@ struct ParagraphStyle {
 
     /// 欧文間隔を伸縮しない固定幅の箱にする（コードブロック等。行頭の空白も残る）
     bool preserveSpaces = false;
+    /// preserveSpaces のとき、タブを何桁ごとのタブ位置で空白に展開するか
+    int tabWidth = 4;
 
     /// 実効の行送り
     Pt resolvedLinePitch(Pt fontSize) const {

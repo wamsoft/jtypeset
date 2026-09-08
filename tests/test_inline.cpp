@@ -297,3 +297,33 @@ TEST_CASE("emphasis marks can be placed on the opposite side") {
         CHECK(marks[3] * side < 0.0f);
     }
 }
+
+TEST_CASE("preserveSpaces expands tabs to tab stops") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+    TextStyle st = fx.style(10.0f);
+    st.font.family = {"serif"};   // 欧文フォント（空白幅が一定）
+    inl::Paragraph p = inl::Paragraph::plain(u"a\tb\nab\tc\n        d", st);
+    p.style.preserveSpaces = true;
+    p.style.align = Align::Start;
+    p.style.tabWidth = 4;
+    inl::ParagraphLayouter layouter(fx.fonts);
+    const inl::ConstantLineShape shape(300.0f);
+    const inl::ParagraphFragment frag = layouter.layout(p, WritingMode::HorizontalTb, shape);
+    REQUIRE(frag.lines.size() == 3);
+    auto xOfGid = [&](const inl::LineBox& line, char32_t c) {
+        const uint32_t gid = fx.latin->glyphIndex(c);
+        for (const inl::PlacedGlyph& g : line.glyphs) if (g.gid == gid) return g.inline_;
+        return -1.0f;
+    };
+    const float xb = xOfGid(frag.lines[0], U'b');   // "a" + 3 spaces → 4 桁目
+    const float xc = xOfGid(frag.lines[1], U'c');   // "ab" + 2 spaces → 4 桁目
+    const float xd = xOfGid(frag.lines[2], U'd');   // 8 spaces → 8 桁目
+    REQUIRE(xb > 0.0f);
+    REQUIRE(xc > 0.0f);
+    REQUIRE(xd > 0.0f);
+    // 空白の幅と a/b の幅は違うので厳密には一致しないが、タブが消えていれば b は a の直後（< 8pt）になる。展開されていれば十分右
+    CHECK(xb > 12.0f);
+    CHECK(xc > 12.0f);
+    CHECK(xd > xb);   // 8 桁は 4 桁より右
+}

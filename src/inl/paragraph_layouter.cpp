@@ -90,10 +90,58 @@ std::vector<Annotation> clipAnnotations(const std::vector<Annotation>& anns, siz
 
 } // namespace
 
-ParagraphFragment ParagraphLayouter::layout(const Paragraph& para, WritingMode wm,
+namespace {
+
+/// preserveSpaces の段落でタブをタブ位置（tabWidth 桁）までの空白に展開する。注記の位置もずらす
+/// （シェイパはタブを幅 0 のグリフにするので、そのままだと消える）
+Paragraph expandTabs(const Paragraph& para) {
+    bool any = false;
+    for (const InlineRun& r : para.runs) if (r.text.find(u'\t') != std::u16string::npos) { any = true; break; }
+    if (!any) return para;
+    const int tabWidth = std::max(1, para.style.tabWidth);
+    Paragraph out = para;
+    std::vector<std::pair<size_t, size_t>> insertions;   // (元の位置, 増えた文字数)
+    size_t pos = 0;      // 元テキストでの位置
+    size_t column = 0;   // 行頭からの桁
+    for (InlineRun& r : out.runs) {
+        std::u16string t;
+        t.reserve(r.text.size());
+        for (char16_t c : r.text) {
+            if (c == u'\n') {
+                column = 0;
+                t.push_back(c);
+            } else if (c == u'\t') {
+                const size_t n = static_cast<size_t>(tabWidth) - column % static_cast<size_t>(tabWidth);
+                t.append(n, u' ');
+                column += n;
+                if (n > 1) insertions.emplace_back(pos, n - 1);
+            } else {
+                t.push_back(c);
+                ++column;
+            }
+            ++pos;
+        }
+        r.text = std::move(t);
+    }
+    for (Annotation& a : out.annotations) {
+        size_t ds = 0, de = 0;
+        for (const auto& [p, n] : insertions) {
+            if (a.start > p) ds += n;
+            if (a.end > p) de += n;
+        }
+        a.start += ds;
+        a.end += de;
+    }
+    return out;
+}
+
+} // namespace
+
+ParagraphFragment ParagraphLayouter::layout(const Paragraph& paraIn, WritingMode wm,
                                             const LineShapeProvider& shape,
                                             size_t charStart, int maxLines,
                                             int firstLineIndex) {
+    const Paragraph para = paraIn.style.preserveSpaces ? expandTabs(paraIn) : paraIn;
     // 行内オブジェクトで行送りが広がると、後ろの行の実際の位置が「行番号 × 行送り」からずれる。
     // 排除領域（回り込み）を見る LineShapeProvider にそのずれを渡して組み直す（不動点まで、最大 3 回）
     std::vector<Pt> offsets;

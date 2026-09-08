@@ -44,7 +44,10 @@ import typeset as ts
 fonts = ts.FontSet()
 fonts.load_file("data/NotoSerifJP-Regular.otf", "serif")
 flow = ts.Flow()
-flow.add_paragraph(ts.Paragraph("吾輩は猫である。", ts.TextStyle(["serif"], 10.5)))
+body = ts.TextStyle(["serif"], 10.5)
+for i, line in enumerate(["吾輩は猫である。", "名前はまだ無い。"]):
+	if i % 2 == 0:  # タブ字下げは 4 桁のタブ位置に展開される
+		flow.add_paragraph(ts.Paragraph(line, body))
 pages = ts.FlowLayouter(fonts).layout(flow, ts.PageSequence())
 ts.save_pdf(pages, "neko.pdf")
 ```
