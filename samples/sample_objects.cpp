@@ -162,8 +162,8 @@ int main() {
         u"<!-- typeset baseline=\"…\" --> のコメントで伝える）。", body));
 
     const std::u16string svgSrc =
-        u"<svg xmlns='http://www.w3.org/2000/svg' width='48pt' height='24pt' viewBox='0 0 120 60'>"
-        u"<!-- typeset baseline='18' -->"
+        u"<svg xmlns='http://www.w3.org/2000/svg' width='90pt' height='45pt' viewBox='0 0 120 60'>"
+        u"<!-- typeset baseline='34' -->"
         u"<defs><path id='tri' d='M0 0 L12 0 L6 -10 Z'/></defs>"
         u"<rect x='2' y='2' width='116' height='56' rx='6' fill='#eef' stroke='#446' stroke-width='1'/>"
         u"<path d='M10 45 Q 40 5 70 45 T 110 45' fill='none' stroke='#c33' stroke-width='2'/>"
@@ -171,7 +171,7 @@ int main() {
         u"<circle cx='60' cy='30' r='4' fill='#36c'/></svg>";
     inl::Paragraph inlineSvg = inl::Paragraph::plain(u"行内に SVG: ", body);
     inlineSvg.addObject("svg", svgSrc, {}, body);
-    inlineSvg.runs.push_back(inl::InlineRun{u" ← ベースライン（下端から 6pt）が本文に揃う。", body});
+    inlineSvg.runs.push_back(inl::InlineRun{u" ← ベースライン（下端から 11pt）が本文に揃い、行より高いぶん行送りが広がる。", body});
     flow.addParagraph(inlineSvg);
 
     flow.addParagraph(inl::Paragraph::plain(

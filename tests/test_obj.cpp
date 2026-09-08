@@ -4,6 +4,7 @@
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <variant>
 
@@ -327,4 +328,71 @@ TEST_CASE("objects in flow: vertical text places the object sideways") {
     const Rect body1 = seq.master.bodyRect(1);
     CHECK(groups[0].x + groups[0].w * 0.5f < body1.right());
     CHECK(groups[0].x + groups[0].w * 0.5f > body1.right() - 20.0f);
+}
+
+TEST_CASE("objects in flow: a tall inline object widens the line pitch instead of overlapping") {
+    font::FontSet fonts;
+    auto jp = fonts.loadFile("data/NotoSerifJP-Regular.otf", "serif-ja");
+    if (!jp) { MESSAGE("fonts not found; skipping"); return; }
+    TextStyle body;
+    body.font.family = {"serif-ja"};
+    body.size = 10.0f;
+
+    obj::ObjectRegistry reg;
+    reg.add("tall", [](const obj::ObjectRequest&) {
+        Path p;
+        p.addRect(Rect{0, 0, 20, 40});
+        dl::PathItem item;
+        item.path = p;
+        item.fill = Color::rgb(0, 0, 0);
+        return obj::makeResult(Size{20, 40}, 30.0f, {item});   // 上 30 / 下 10
+    });
+    page::PageSequence seq;
+    seq.master.size = Size{300, 400};
+    seq.master.margin = page::Margins{20, 20, 20, 20};
+    seq.master.writingMode = WritingMode::HorizontalTb;
+
+    block::Flow flow;
+    inl::Paragraph p;
+    p.runs.push_back(inl::InlineRun{u"前の行の文章がここにあって、", body});
+    p.addObject("tall", u"x", {}, body);
+    std::u16string rest;
+    for (int i = 0; i < 6; ++i) rest += u"後ろの文章が続く。";
+    p.runs.push_back(inl::InlineRun{rest, body});
+    flow.addParagraph(p);
+    flow.addParagraph(inl::Paragraph::plain(u"次の段落。", body));
+
+    page::FlowLayoutOptions opts;
+    opts.objects = &reg;
+    page::FlowLayouter layouter(fonts);
+    const auto pages = layouter.layout(flow, seq, opts);
+    REQUIRE(pages.size() == 1);
+
+    // オブジェクトの箱と、各行のベースライン y を集める
+    std::optional<Rect> box;
+    std::vector<float> baselines;
+    for (const dl::Item& item : pages[0].dl.items) {
+        if (const auto* g = std::get_if<dl::Group>(&item)) {
+            box = pathBounds(g->children, g->xform);
+        } else if (const auto* run = std::get_if<dl::GlyphRun>(&item)) {
+            for (const dl::Glyph& gl : run->glyphs) {
+                bool found = false;
+                for (float y : baselines) if (std::fabs(y - gl.pos.y) < 0.5f) { found = true; break; }
+                if (!found) baselines.push_back(gl.pos.y);
+            }
+        }
+    }
+    REQUIRE(box.has_value());
+    REQUIRE(baselines.size() >= 3);
+    std::sort(baselines.begin(), baselines.end());
+    // 1 行目のベースラインはオブジェクトの上端 + 30
+    CHECK(baselines[0] == doctest::Approx(box->y + 30.0f).epsilon(0.01));
+    // 2 行目の文字（上端 ≒ ベースライン − 0.88em）はオブジェクトの下端より下
+    CHECK(baselines[1] - body.size * 0.9f >= box->bottom() - 0.5f);
+    // 行送りが広がったのは 1 行目の周りだけ: 2 行目→3 行目は通常の行送り
+    const float normal = baselines[2] - baselines[1];
+    CHECK(baselines[1] - baselines[0] > normal + 5.0f);
+    // 1 行目の上にも広がる: 版面上端から 1 行目のベースラインまでが 30 以上
+    const Rect bodyRect = seq.master.bodyRect(1);
+    CHECK(baselines[0] - bodyRect.y >= 30.0f - 0.5f);
 }

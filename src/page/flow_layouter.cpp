@@ -316,6 +316,9 @@ private:
                         inl::ParagraphFragment* fragOut = nullptr);
     /// 段落を組んだときの行送り方向の量（置かない）
     Pt measureParagraph(const inl::Paragraph& para, Pt lineLength, Pt* naturalMax = nullptr);
+    /// maxLines 行以内で組み、行内オブジェクトで広がった行送りが available に入らなければ行数を減らす
+    inl::ParagraphFragment layoutFitting(const inl::Paragraph& para, const inl::LineShapeProvider& shape,
+                                         size_t charStart, int maxLines, Pt available);
 };
 
 //------------------------------------------------------------------------------
@@ -459,7 +462,17 @@ Pt Flower::measureParagraph(const inl::Paragraph& para, Pt lineLength, Pt* natur
         for (const inl::LineBox& l : frag.lines) m = std::max(m, l.naturalLength + l.indent);
         *naturalMax = m;
     }
-    return frag.linePitch * static_cast<float>(frag.lines.size());
+    return frag.blockExtent();
+}
+
+inl::ParagraphFragment Flower::layoutFitting(const inl::Paragraph& para, const inl::LineShapeProvider& shape,
+                                             size_t charStart, int maxLines, Pt available) {
+    inl::ParagraphFragment frag = layouter_.layout(para, wm(), shape, charStart, maxLines);
+    // 行内オブジェクトで行送りが広がって入らなくなったら、行数を減らして組み直す
+    while (frag.lines.size() > 1 && frag.blockExtent() > available + kEps) {
+        frag = layouter_.layout(para, wm(), shape, charStart, static_cast<int>(frag.lines.size()) - 1);
+    }
+    return frag;
 }
 
 Pt Flower::placeParagraphAt(const inl::Paragraph& para, Pt blockOffset, Pt inlineOffset,
@@ -473,7 +486,7 @@ Pt Flower::placeParagraphAt(const inl::Paragraph& para, Pt blockOffset, Pt inlin
     if (frag.lines.empty()) return 0.0f;
     const Point origin = region().lineOrigin(blockOffset, frag.linePitch, inlineOffset);
     inl::emitParagraph(page().dl, frag, wm(), origin);
-    return frag.linePitch * static_cast<float>(frag.lines.size());
+    return frag.blockExtent();
 }
 
 //------------------------------------------------------------------------------
@@ -739,7 +752,7 @@ void Flower::placeToc(const block::TocBlock& toc, const PageStart* resume) {
         const Pt used = placeParagraphAt(title, 0.0f, indent, titleLen, std::nullopt, &frag);
         if (frag.lines.empty()) continue;
         const Pt pitch = frag.linePitch;
-        const Pt lastLineOffset = pitch * static_cast<float>(frag.lines.size() - 1);
+        const Pt lastLineOffset = frag.lineCenterOffset(frag.lines.size() - 1);
 
         // ページ番号は最後の行の右端
         inl::Paragraph num = inl::Paragraph::plain(toU16(e.page), st);
@@ -1374,11 +1387,11 @@ void Flower::placeTable(const block::TableBlock& table) {
                     if (fit <= 0) break;
                     const inl::ConstantLineShape shape(std::max(1.0f, cellWidth));
                     const inl::ParagraphFragment frag =
-                        layouter_.layout(p, wm(), shape, cursors[i].charStart, fit);
+                        layoutFitting(p, shape, cursors[i].charStart, fit, avail - off + pad);
                     if (frag.lines.empty()) break;
                     const Point origin = reg.lineOrigin(off, pitch, colStart[g.col] + pad);
                     inl::emitParagraph(page().dl, frag, wm(), origin);
-                    off += pitch * static_cast<float>(frag.lines.size());
+                    off += frag.blockExtent();
                     if (frag.complete) {
                         cursors[i].para += 1;
                         cursors[i].charStart = 0;
@@ -1596,8 +1609,17 @@ void Flower::flowParagraph(const inl::Paragraph& paraIn, const block::BlockStyle
         }
 
         const RegionLineShape shape(reg, reg.used, pitch, bodyIndent);
-        inl::ParagraphFragment frag = layouter_.layout(para, wm(), shape, charStart, fit);
+        inl::ParagraphFragment frag = layoutFitting(para, shape, charStart, fit, reg.remaining());
         const bool starting = (charStart == 0);
+
+        // 1 行でも入らない（行内オブジェクトで行送りが広がった）: 次の段へ
+        if (frag.lines.size() == 1 && frag.blockExtent() > reg.remaining() + kEps &&
+            !reg.fresh() && !forceHere) {
+            reg.used = segTop;
+            moveToNextRegion();
+            if (aborted()) return;
+            continue;
+        }
 
         if (starting && !frag.complete && static_cast<int>(frag.lines.size()) < style.orphans &&
             !reg.fresh() && !forceHere) {
@@ -1637,7 +1659,7 @@ void Flower::flowParagraph(const inl::Paragraph& paraIn, const block::BlockStyle
         const Point origin = reg.lineOrigin(0.0f, pitch);
         inl::emitParagraph(page().dl, frag, wm(), origin);
 
-        int linesUsed = static_cast<int>(frag.lines.size());
+        Pt consumed = frag.blockExtent();
         if (!labelPlaced) {
             inl::Paragraph lp = *label;
             lp.style.firstLineIndent = 0.0f;
@@ -1647,10 +1669,10 @@ void Flower::flowParagraph(const inl::Paragraph& paraIn, const block::BlockStyle
             const inl::ConstantLineShape lshape(labelWidth);
             const inl::ParagraphFragment lfrag = layouter_.layout(lp, wm(), lshape);
             inl::emitParagraph(page().dl, lfrag, wm(), reg.lineOrigin(0.0f, pitch, s0));
-            linesUsed = std::max(linesUsed, static_cast<int>(lfrag.lines.size()));
+            consumed = std::max(consumed, pitch * static_cast<float>(lfrag.lines.size()));
             labelPlaced = true;
         }
-        reg.used += pitch * static_cast<float>(linesUsed);
+        reg.used += consumed;
 
         // 背景（末尾の余白は最後の断片だけ）
         if (decorated) {

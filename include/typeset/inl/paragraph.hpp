@@ -108,6 +108,10 @@ struct LineBox {
     int lineIndex = 0;                  ///< LineShapeProvider の行番号
     Pt indent = 0.0f;                   ///< 行頭の下げ（一字下げ＋揃えによるシフト）
     bool paragraphEnd = false;          ///< この行で（改行または本文の終わりで）段落が終わる
+    /// 行内オブジェクト／画像が行送りの箱 [-pitch/2, +pitch/2] から出るぶんの追加の送り（TeX の lineskip 相当）。
+    /// ルビや横倒しの張り出しでは広げない（行間に収める）
+    Pt extraBefore = 0.0f;
+    Pt extraAfter = 0.0f;
 };
 
 struct ParagraphFragment {
@@ -119,6 +123,23 @@ struct ParagraphFragment {
     Pt linePitch = 0.0f;                ///< 行送り
     Pt baseSize = 0.0f;
     std::shared_ptr<const std::u16string> text;   ///< 元テキスト（ToUnicode 用）
+
+    /// 行 li が占める行送り方向の量（行送り＋行内オブジェクトのための追加）
+    Pt lineAdvance(size_t li) const {
+        return linePitch + lines[li].extraBefore + lines[li].extraAfter;
+    }
+    /// 行 li の中心線の、「0 行目の行送りの箱の始端＋pitch/2」からの距離（追加が無ければ pitch × li）
+    Pt lineCenterOffset(size_t li) const {
+        Pt off = 0.0f;
+        for (size_t j = 0; j < li && j < lines.size(); ++j) off += lineAdvance(j);
+        return off + (li < lines.size() ? lines[li].extraBefore : 0.0f);
+    }
+    /// 全行が占める行送り方向の量
+    Pt blockExtent() const {
+        Pt s = 0.0f;
+        for (size_t j = 0; j < lines.size(); ++j) s += lineAdvance(j);
+        return s;
+    }
 };
 
 class ParagraphLayouter {
@@ -148,6 +169,8 @@ private:
  *               縦組みでは (1 列目の中心線 x, 上端)
  */
 Point lineOrigin(WritingMode wm, Point origin, int lineOffset, Pt linePitch, Pt indent);
+/// 行送り方向に adv 進んだ行頭
+Point lineOriginAt(WritingMode wm, Point origin, Pt adv, Pt indent);
 
 /**
  * 段落を表示リストへ出す

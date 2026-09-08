@@ -37,7 +37,9 @@ text/      CharClass          JLReq 附属書 A の文字クラス。ASCII の�
 inl/       shaper             Itemizer（スタイル・face・向き）＋ HarfBuzz。正立は TTB、他は LTR
            item_builder       クラスタ列＋注記 → Box / Glue / Penalty（禁則・ぶら下げ・ルビ・縦中横・圏点・割注・字取り）
            line_breaker       Greedy / Knuth–Plass。行長は LineShapeProvider::at(lineIndex) で行ごと（\parshape）
-           paragraph          Paragraph → ParagraphFragment（LineBox 列）。charStart からの再開と maxLines
+           paragraph          Paragraph → ParagraphFragment（LineBox 列）。charStart からの再開と maxLines。
+                              行内オブジェクト／画像が行送りの箱から出る行は extraBefore/After で送りを広げる
+                              （行位置は lineCenterOffset、消費量は blockExtent。等間隔の pitch × n を仮定しない）
 block/     Block              段落・見出し・罫線・ラベル付き段落・画像・表・セクション、BlockStyle（orphans/widows/keepWithNext/改ページ）
 page/      PageMaster/Region  判型・余白・段。Region は排除領域（回り込み）を持ち RegionLineShape が行の形を返す
            FlowLayouter       Flow をページ列へ流し込む。柱・ノンブル（{page} {pages} {title}）。

@@ -11,6 +11,31 @@
 
 namespace typeset::inl {
 
+namespace {
+
+/// 行内オブジェクト／画像が行送りの箱から出るぶんを、行の前後の追加の送りにする
+void computeExtraLeading(LineBox& line, Pt pitch, bool vertical) {
+    Pt top = -pitch * 0.5f, bottom = pitch * 0.5f;
+    bool any = false;
+    for (const PlacedGlyph& g : line.glyphs) {
+        if (g.object) {
+            top = std::min(top, g.block);
+            bottom = std::max(bottom, g.block + g.object->size.h);
+            any = true;
+        } else if (g.image) {
+            const Pt half = vertical ? g.imageSize.w * 0.5f : g.imageSize.h * 0.5f;
+            top = std::min(top, g.block - half);
+            bottom = std::max(bottom, g.block + half);
+            any = true;
+        }
+    }
+    if (!any) return;
+    line.extraBefore = std::max(0.0f, -top - pitch * 0.5f);
+    line.extraAfter = std::max(0.0f, bottom - pitch * 0.5f);
+}
+
+} // namespace
+
 dl::Group objectGroup(const obj::ObjectResult& ob, const Rect& box, bool sideways) {
     dl::Group grp;
     if (!sideways) {
@@ -221,6 +246,7 @@ ParagraphFragment ParagraphLayouter::layout(const Paragraph& para, WritingMode w
                     line.charEnd = pos + cluster.charEnd;
                     v += item.width;
                 }
+                computeExtraLeading(line, frag.linePitch, isVertical(wm));
                 frag.lines.push_back(std::move(line));
                 ++lineIndex;
             }
@@ -240,7 +266,10 @@ ParagraphFragment ParagraphLayouter::layout(const Paragraph& para, WritingMode w
 //------------------------------------------------------------------------------
 
 Point lineOrigin(WritingMode wm, Point origin, int lineOffset, Pt linePitch, Pt indent) {
-    const Pt adv = linePitch * static_cast<float>(lineOffset);
+    return lineOriginAt(wm, origin, linePitch * static_cast<float>(lineOffset), indent);
+}
+
+Point lineOriginAt(WritingMode wm, Point origin, Pt adv, Pt indent) {
     switch (wm) {
     case WritingMode::HorizontalTb: return Point{origin.x + indent, origin.y + adv};
     case WritingMode::VerticalRl:   return Point{origin.x - adv, origin.y + indent};
@@ -253,8 +282,9 @@ void emitParagraph(dl::DisplayList& out, const ParagraphFragment& frag, WritingM
                    Point origin, int lineOffset) {
     for (size_t li = 0; li < frag.lines.size(); ++li) {
         const LineBox& line = frag.lines[li];
-        const Point lo = lineOrigin(wm, origin, lineOffset + static_cast<int>(li),
-                                    frag.linePitch, line.indent);
+        const Point lo = lineOriginAt(wm, origin,
+                                      frag.linePitch * static_cast<float>(lineOffset) + frag.lineCenterOffset(li),
+                                      line.indent);
 
         dl::GlyphRun run;
         bool open = false;
