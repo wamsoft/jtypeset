@@ -71,6 +71,7 @@ class Options:
     paper: str = "A4"                 # A4 / A5 / B5 / B6 / 文庫 / 新書 / "148x210mm"
     landscape: bool = False
     writing: str = "horizontal"       # horizontal / vertical
+    direction: str = "auto"           # auto / ltr / rtl（段落の基底方向。行内の双方向は常に UAX #9）
     columns: int = 1
     column_gap: float = 0.0           # pt（0 = 既定）
     margin: Any = None                # mm。数値、または {top, bottom, inner, outer}
@@ -260,15 +261,19 @@ class Converter:
             st = ts.TextStyle(o.font_heading, o.size * scale)
             st.font.weight = 600
             self.head_styles[level] = st
+        direction = {"ltr": ts.Direction.LTR, "rtl": ts.Direction.RTL}.get(str(o.direction).lower(), ts.Direction.AUTO)
         self.pstyle = ts.ParagraphStyle()
         self.pstyle.line_height = o.line_height
         self.pstyle.first_line_indent = 1.0 if o.indent else 0.0   # em
+        self.pstyle.direction = direction
         if not o.justify:
             self.pstyle.align = ts.Align.START
         self.plain_pstyle = ts.ParagraphStyle()
         self.plain_pstyle.line_height = o.line_height
         self.plain_pstyle.first_line_indent = 0.0
+        self.plain_pstyle.direction = direction
         self.head_pstyle = ts.ParagraphStyle()
+        self.head_pstyle.direction = direction
         self.head_pstyle.align = ts.Align.START
         self.head_pstyle.line_height = 1.4
         self.head_pstyle.first_line_indent = 0.0

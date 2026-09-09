@@ -72,6 +72,7 @@ struct ShapedCluster {
     bool upright = true;    ///< 正立か横倒しか（横組みでは常に true）
     uint32_t styleIndex = 0;
     bool object = false;    ///< 行内画像などの箱（ボディ幅はシェイパーの送りのまま）
+    uint8_t level = 0;      ///< UAX #9 の埋め込みレベル（奇数が RTL）。行を確定したあとの並べ替えに使う
 };
 
 struct ShapedText {
@@ -81,6 +82,8 @@ struct ShapedText {
     Pt advance = 0.0f;      ///< 総送り
     Pt blockMin = 0.0f;     ///< 中心線からの張り出し（負側）
     Pt blockMax = 0.0f;     ///< 同（正側）
+    int paragraphLevel = 0; ///< UAX #9 の段落レベル（1 なら RTL の段落）
+    bool bidi = false;      ///< レベル 0 以外のクラスタがある（行の並べ替えが要る）
 };
 
 /**

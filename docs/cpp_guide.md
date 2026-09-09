@@ -47,7 +47,7 @@ pdf.save("out.pdf");
 |---|---|---|
 | `typeset` | `Pt` `Point` `Rect` `Matrix` `Color` `Path`（geom.hpp）、`WritingMode`（writing_mode.hpp）、`TextStyle` `TextLayer` `TextShadow` `TextDecoration` `ParagraphStyle` `SpacingOptions` `BreakOptions`（style.hpp） | 幾何・書字方向・スタイル。文字の外観は塗り＋縁取りのほか、影・多層の縁取り（`layers`）・下線・打消し線 |
 | `typeset::font` | `FontSet` `FontDeclaration` | フォントをキー／family 名で引き、文字カバレッジでフォールバックを解決。同じ family の複数 face から weight / italic の最近傍を選ぶ（無ければフェイクボールド／斜体）。`declare()` はメタデータだけ登録して初回使用時に開く。`setLanguageFonts()` で言語ごとに先に試す family。バリアブルフォントは `FontSpec::variations` / weight で軸を固定した別 Face（`instance()`）。シェイピング用の `hb_font_t` も持つ |
-| `typeset::text` | `CharClass` `SpacingTable`（JLReq 附属書 A・表 3）、`orientation`（UAX #50）、`line_break`（UAX #14） | 文字クラスとアキ量、向き、分割機会 |
+| `typeset::text` | `CharClass` `SpacingTable`（JLReq 附属書 A・表 3）、`orientation`（UAX #50）、`line_break`（UAX #14） | 文字クラスとアキ量、向き、分割機会。双方向（UAX #9）は shaper が glyphware の SheenBidi で解き、行ごとに視覚順へ並べ替える（`ParagraphStyle::direction`） |
 | `typeset::inl` | `Paragraph` `InlineRun` `Annotation`、`ParagraphLayouter` `ParagraphFragment` `LineBox`、`LineShapeProvider`、`shapeText()` | 行内組版。Box / Glue / Penalty 列を Greedy / Knuth–Plass で解く。ルビ・縦中横・圏点・割注・字取り・行内画像／オブジェクト／プレースホルダ（`addPlaceholder`）・脚注記号 |
 | `typeset::inl`（取り出し口） | `charBoxes()` `rectsFor()` `placeholderRects()` `hitTest()` `caretRect()` `measureText()`、`emitParagraph(..., maxChars)` | 組んだあとの問い合わせ。文字の箱、文字範囲 → 矩形（リンク・選択）、プレースホルダの位置、点 → 文字、キャレット、1 行計測。`maxChars` で組み直さずに途中まで描く（段階表示） |
 | `typeset::block` | `Flow`、`ParagraphBlock` `HeadingBlock` `RuleBlock` `SpacerBlock` `LabeledBlock` `SectionBlock` `ImageBlock` `TableBlock` `ListBlock` `TocBlock` `IndexBlock` `ObjectBlock`、`BlockStyle` | ブロックの列と改ページ制御（orphans / widows / keepWithNext / keepTogether / spanColumns） |

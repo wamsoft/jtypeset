@@ -82,6 +82,7 @@ date: 2026 年 9 月 8 日
 paper: A4                 # A4 / A5 / B5 / B6 / 文庫 / 新書 / "148x210mm"
 landscape: false
 writing: horizontal       # horizontal / vertical
+direction: auto           # auto / ltr / rtl（段落の基底方向。行内のアラビア文字・ヘブライ文字は常に双方向で並ぶ）
 columns: 1
 margin: 20                # mm。{top: 25, bottom: 20, inner: 22, outer: 18} も可
 fonts:                    # フォントファイル（相対パスは Markdown の場所から）

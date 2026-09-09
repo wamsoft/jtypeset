@@ -186,11 +186,18 @@ struct BreakOptions {
 
 enum class Align : uint8_t { Start, End, Center, Justify };
 
+/// 段落の基底方向（UAX #9）。Auto は最初の強い文字で決める（和文・欧文は LTR）
+enum class Direction : uint8_t { Auto, Ltr, Rtl };
+
 /**
  * 段落スタイル
  */
 struct ParagraphStyle {
     Align align = Align::Justify;
+
+    /// 基底方向。RTL の段落では Start / End が入れ替わり、一字下げは行の終端側（右）に付く。
+    /// 行の中の双方向テキスト（アラビア文字・ヘブライ文字の混在）は方向に関わらず UAX #9 で並べ替える
+    Direction direction = Direction::Auto;
 
     /// 一字下げ（em 単位。日本語段落の既定は 1）
     float firstLineIndent = 0.0f;

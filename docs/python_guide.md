@@ -130,6 +130,7 @@ pages, warnings = convert_file("report.md", "report.pdf", Options(), png_dpi=0,
 | `title` `author` `date` | 表題ブロックと `{title}` | |
 | `paper` `landscape` | A4 / A5 / B5 / B6 / 文庫 / 新書 / `148x210mm` | A4 |
 | `writing` | horizontal / vertical | horizontal |
+| `direction` | auto / ltr / rtl（段落の基底方向） | auto |
 | `columns` `column-gap` | 段数と段間（pt） | 1 |
 | `margin` | mm。数値または `{top, bottom, inner, outer}` | 20（A5 等は 16） |
 | `fonts` | フォントファイルの列（`{path, key, index, family, weight, italic, languages}` も可。family 等を書いたものは初回使用時に開く）。無ければ `data/` の Noto → OS のフォント | |

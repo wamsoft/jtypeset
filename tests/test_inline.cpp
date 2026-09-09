@@ -1157,3 +1157,117 @@ TEST_CASE("variable fonts: weight and axis values select an instance, no fake bo
     for (size_t p = bytes.find("/FontFile"); p != std::string::npos; p = bytes.find("/FontFile", p + 1)) ++fontFiles;
     CHECK(fontFiles == 3);
 }
+
+TEST_CASE("bidi: RTL runs are reordered visually within the line, in horizontal and vertical text") {
+    font::FontSet fonts;
+    auto latin = fonts.loadFile("data/NotoSans-Regular.ttf", "sans");
+    auto hebrew = fonts.loadFile("data/NotoSansHebrew-Regular.ttf", "hebrew");
+    auto arabic = fonts.loadFile("data/NotoSansArabic-Regular.ttf", "arabic");
+    if (!latin || !hebrew || !arabic) { MESSAGE("fonts not found; skipping"); return; }
+    TextStyle st;
+    st.font.family = {"sans", "hebrew", "arabic"};
+    st.size = 10.0f;
+    st.language = "en";
+    inl::ParagraphLayouter layouter(fonts);
+    const inl::ConstantLineShape shape(400.0f);
+
+    // 欧文の中のヘブライ語: "abc " + שלום + " def"
+    const std::u16string text = u"abc שלום def";
+    inl::Paragraph para = inl::Paragraph::plain(text, st);
+    para.style.align = Align::Start;
+    para.style.lineBreak.justify = false;
+    for (WritingMode wm : {WritingMode::HorizontalTb, WritingMode::VerticalRl}) {
+        const inl::ParagraphFragment frag = layouter.layout(para, wm, shape);
+        REQUIRE(frag.lines.size() == 1);
+        const auto boxes = inl::charBoxes(frag, wm, 0);   // 送り方向の順（視覚順）。空白はグルーなので箱に無い
+        REQUIRE(boxes.size() == 10);
+        // 視覚順: a b c ␠ ם ו ל ש ␠ d e f
+        const std::vector<uint32_t> expected{0, 1, 2, 7, 6, 5, 4, 9, 10, 11};
+        for (size_t i = 0; i < expected.size(); ++i) CHECK(boxes[i].charIndex == expected[i]);
+        // 箱は重ならずに並ぶ（空白のぶんだけ隙間）
+        for (size_t i = 0; i + 1 < boxes.size(); ++i) CHECK(boxes[i].inlineEnd <= boxes[i + 1].inlineStart + 0.01f);
+        // 行長は変わらない
+        CHECK(boxes.back().inlineEnd == doctest::Approx(frag.lines[0].naturalLength).epsilon(0.01));
+        // 描いたグリフも同じ順（ヘブライ文字のペン位置は後ろの文字ほど手前）
+        dl::DisplayList out;
+        inl::emitParagraph(out, frag, wm, Point{0, 0});
+        Pt posOf4 = 0, posOf7 = 0;
+        for (const dl::Item& item : out.items) {
+            if (const auto* run = std::get_if<dl::GlyphRun>(&item)) {
+                for (const dl::Glyph& g : run->glyphs) {
+                    const Pt p = (wm == WritingMode::HorizontalTb) ? g.pos.x : g.pos.y;
+                    if (g.charIndex == 4) posOf4 = p;
+                    if (g.charIndex == 7) posOf7 = p;
+                }
+            }
+        }
+        CHECK(posOf4 > posOf7);
+    }
+
+    // 空白（グルー）は自分のレベル（両側の run の間では段落レベル）で並ぶ: 各 run の前後に 1 つずつ
+    {
+        inl::Paragraph mixed = inl::Paragraph::plain(u"ab גד ef", st);
+        mixed.style.align = Align::Start;
+        mixed.style.lineBreak.justify = false;
+        mixed.style.direction = Direction::Ltr;
+        const inl::ParagraphFragment frag = layouter.layout(mixed, WritingMode::HorizontalTb, shape);
+        const auto boxes = inl::charBoxes(frag, WritingMode::HorizontalTb, 0);
+        REQUIRE(boxes.size() == 6);
+        const std::vector<uint32_t> expected{0, 1, 4, 3, 6, 7};
+        for (size_t i = 0; i < expected.size(); ++i) CHECK(boxes[i].charIndex == expected[i]);
+        const Pt space = inl::measureText(fonts, u" ", st).advance;
+        CHECK(boxes[2].inlineStart - boxes[1].inlineEnd == doctest::Approx(space).epsilon(0.02));
+        CHECK(boxes[4].inlineStart - boxes[3].inlineEnd == doctest::Approx(space).epsilon(0.02));
+        CHECK(boxes[3].inlineStart == doctest::Approx(boxes[2].inlineEnd).epsilon(0.01));
+    }
+
+    // RTL の段落（Auto で最初の強い文字がヘブライ文字）: 行頭揃えは右揃えになり、最初の文字が終端側
+    {
+        inl::Paragraph rtl = inl::Paragraph::plain(u"שלום abc", st);
+        rtl.style.align = Align::Start;
+        rtl.style.lineBreak.justify = false;
+        rtl.style.firstLineIndent = 1.0f;
+        const inl::ParagraphFragment frag = layouter.layout(rtl, WritingMode::HorizontalTb, shape);
+        REQUIRE(frag.lines.size() == 1);
+        const auto boxes = inl::charBoxes(frag, WritingMode::HorizontalTb, 0);
+        REQUIRE(boxes.size() == 7);
+        // 視覚順: a b c ␠ ם ו ל ש
+        CHECK(boxes[0].charIndex == 5);
+        CHECK(boxes.back().charIndex == 0);
+        // 右揃え: 行頭のずれ（indent）は 400 - 一字下げ 10 - 自然長
+        CHECK(frag.lines[0].indent == doctest::Approx(400.0f - 10.0f - frag.lines[0].naturalLength).epsilon(0.01));
+        // 明示の LTR なら左揃えのまま（先頭の一字下げ）
+        rtl.style.direction = Direction::Ltr;
+        const inl::ParagraphFragment fl = layouter.layout(rtl, WritingMode::HorizontalTb, shape);
+        CHECK(fl.lines[0].indent == doctest::Approx(10.0f));
+        const auto bl = inl::charBoxes(fl, WritingMode::HorizontalTb, 0);
+        CHECK(bl[0].charIndex == 3);     // ヘブライ語の run は反転したまま、run 全体は左に
+        CHECK(bl.back().charIndex == 7);
+    }
+
+    // アラビア語: 文脈字形が付き（単独形と別のグリフ）、語間だけで折り返す
+    {
+        const std::u16string ar = u"العربية لغة جميلة "
+                                  u"ومفيدة للقراءة";
+        const inl::TextMetrics joined = inl::measureText(fonts, u"لع", st);   // ل + ع（結合）
+        const inl::TextMetrics l = inl::measureText(fonts, u"ل", st);
+        const inl::TextMetrics a = inl::measureText(fonts, u"ع", st);
+        CHECK(joined.advance < l.advance + a.advance - 0.5f);   // 頭字形・尾字形は単独形より詰まる
+        inl::Paragraph pa = inl::Paragraph::plain(ar, st);
+        pa.style.align = Align::Start;
+        pa.style.lineBreak.justify = false;
+        const inl::ConstantLineShape narrow(60.0f);
+        const inl::ParagraphFragment frag = layouter.layout(pa, WritingMode::HorizontalTb, narrow);
+        REQUIRE(frag.lines.size() >= 2);
+        for (size_t i = 0; i + 1 < frag.lines.size(); ++i) {
+            CHECK(ar[frag.lines[i].charEnd] == u' ');                  // 語の切れ目で折り返す
+            CHECK(frag.lines[i + 1].charStart > frag.lines[i].charEnd);
+            CHECK(frag.lines[i].length <= 60.0f + 0.01f);
+        }
+        CHECK(frag.complete);
+        // RTL の段落: 各行の右端から始まる（最初の文字の箱が一番右）
+        const auto boxes = inl::charBoxes(frag, WritingMode::HorizontalTb, 0);
+        REQUIRE(!boxes.empty());
+        CHECK(boxes.back().charIndex == frag.lines[0].charStart);
+    }
+}

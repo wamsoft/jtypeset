@@ -656,6 +656,7 @@ std::vector<LineItem> buildLineItems(const ShapedText& shaped,
         if (cls == CharClass::Space && compIdx == kNone && !ctx.preserveSpaces) {
             const Pt w = cluster.advance;
             items.push_back(LineItem::gluePt(w, w * 0.5f, w / 3.0f, cluster.charStart));
+            items.back().level = cluster.level;    // 双方向の並べ替えで空白自身のレベルを使う（L1 の解決済み）
             prevWasBox = false;
             prevClass = cls;
             prevCharEnd = cluster.charEnd;

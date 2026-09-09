@@ -157,6 +157,10 @@ Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
         .value("MIXED", TextOrientation::Mixed)
         .value("UPRIGHT", TextOrientation::Upright)
         .value("SIDEWAYS", TextOrientation::Sideways);
+    py::enum_<Direction>(m, "Direction", "段落の基底方向（AUTO は最初の強い文字で決める）")
+        .value("AUTO", Direction::Auto)
+        .value("LTR", Direction::Ltr)
+        .value("RTL", Direction::Rtl);
     py::enum_<Align>(m, "Align")
         .value("START", Align::Start)
         .value("END", Align::End)
@@ -294,6 +298,7 @@ Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
     py::class_<ParagraphStyle>(m, "ParagraphStyle", "段落スタイル: 揃え・行送り・一字下げ・向き・空白保持（コード）・タブ幅・アキ量・行分割")
         .def(py::init<>())
         .def_readwrite("align", &ParagraphStyle::align)
+        .def_readwrite("direction", &ParagraphStyle::direction, "基底方向（Direction）。RTL では Start / End が入れ替わる")
         .def_readwrite("first_line_indent", &ParagraphStyle::firstLineIndent)
         .def_readwrite("line_pitch", &ParagraphStyle::linePitch)
         .def_readwrite("line_height", &ParagraphStyle::lineHeight)

@@ -36,6 +36,8 @@ struct ShapeContext {
     const std::vector<std::shared_ptr<const obj::ObjectResult>>* objects = nullptr;
     /// styleIndex → 行内プレースホルダか（大きさは imageSizes）
     const std::vector<bool>* placeholders = nullptr;
+    /// 段落の基底方向（UAX #9 の P2/P3 を Auto で）
+    Direction direction = Direction::Auto;
 };
 
 /**

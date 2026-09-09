@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include <hb.h>
+#include <glyphware/Bidi.h>
 
 #include "typeset/dl/glyph_transform.hpp"
 #include "typeset/text/orientation.hpp"
@@ -22,7 +23,38 @@ struct Segment {
     std::shared_ptr<glyphware::Face> face;
     bool upright = true;
     uint32_t styleIndex = 0;
+    uint8_t level = 0;      ///< UAX #9 の埋め込みレベル
 };
+
+/**
+ * UAX #9 の埋め込みレベルを UTF-16 の位置ごとに求める（glyphware の SheenBidi。UTF-8 で解析して写す）
+ * @return 段落レベル（0 = LTR、1 = RTL）
+ */
+int bidiLevels(const std::u16string& text, Direction dir, std::vector<uint8_t>& levels) {
+    levels.assign(text.size(), 0);
+    std::string utf8;
+    std::vector<size_t> offset(text.size() + 1, 0);
+    for (size_t i = 0; i < text.size();) {
+        size_t len = 1;
+        const char32_t cp = text::codePointAt(text, i, len);
+        offset[i] = utf8.size();
+        if (len == 2 && i + 1 < text.size()) offset[i + 1] = utf8.size();
+        std::u16string one;
+        text::appendCodePoint(one, cp);
+        utf8 += text::utf16ToUtf8(one);
+        i += len;
+    }
+    offset[text.size()] = utf8.size();
+    const glyphware::BaseDirection base = dir == Direction::Ltr ? glyphware::BaseDirection::LTR
+                                        : dir == Direction::Rtl ? glyphware::BaseDirection::RTL
+                                                                : glyphware::BaseDirection::Auto;
+    const glyphware::BidiResult r = glyphware::bidiAnalyze(utf8, base);
+    for (size_t i = 0; i < text.size(); ++i) {
+        const size_t o = offset[i];
+        levels[i] = o < r.levels.size() ? r.levels[o] : static_cast<uint8_t>(r.paragraphLevel);
+    }
+    return r.paragraphLevel;
+}
 
 /// 絵文字の結合要素（ZWJ・異体字セレクタ・肌色修飾子・タグ・キーキャップ）。前の文字と同じ face・向きで
 /// 同じセグメントに入れないと、HarfBuzz が結合（ZWJ シーケンス・国旗・肌色）を作れない
@@ -42,8 +74,9 @@ bool resolveUpright(WritingMode wm, TextOrientation ori, char32_t cp) {
 
 /// スタイル・face・向きで分割する
 std::vector<Segment> itemize(const std::u16string& text, const std::vector<StyleRun>& runs,
-                             const ShapeContext& ctx) {
+                             const ShapeContext& ctx, const std::vector<uint8_t>& levels) {
     std::vector<Segment> segs;
+    const bool vertical = isVertical(ctx.writingMode);
     for (const StyleRun& run : runs) {
         if (run.end <= run.start || !ctx.styles || run.styleIndex >= ctx.styles->size()) continue;
         const TextStyle& style = (*ctx.styles)[run.styleIndex];
@@ -60,10 +93,12 @@ std::vector<Segment> itemize(const std::u16string& text, const std::vector<Style
             }
             auto face = ctx.fonts.resolve(style.font, cp, style.language);
             const bool upright = resolveUpright(ctx.writingMode, ori, cp);
+            // 正立の縦組みは上から下へ論理順に置くので双方向の並べ替えをしない（CSS の upright と同じ）
+            const uint8_t level = (vertical && upright) ? 0 : (i < levels.size() ? levels[i] : 0);
             if (!segs.empty()) {
                 Segment& last = segs.back();
                 if (last.end == i && last.face == face && last.upright == upright &&
-                    last.styleIndex == run.styleIndex) {
+                    last.styleIndex == run.styleIndex && last.level == level) {
                     last.end = i + len;
                     i += len;
                     continue;
@@ -72,6 +107,7 @@ std::vector<Segment> itemize(const std::u16string& text, const std::vector<Style
             Segment s;
             s.start = i;
             s.end = i + len;
+            s.level = level;
             s.face = face;
             s.upright = upright;
             s.styleIndex = run.styleIndex;
@@ -110,7 +146,10 @@ ShapedText shapeText(const std::u16string& text, const std::vector<StyleRun>& ru
     if (text.empty() || !ctx.styles) return result;
 
     const bool vertical = isVertical(ctx.writingMode);
-    const std::vector<Segment> segs = itemize(text, runs, ctx);
+    std::vector<uint8_t> levels;
+    result.paragraphLevel = bidiLevels(text, ctx.direction, levels);
+    const std::vector<Segment> segs = itemize(text, runs, ctx, levels);
+    for (const Segment& s : segs) if (s.level != 0) result.bidi = true;
 
     hb_buffer_t* buffer = hb_buffer_create();
     const uint16_t* raw = reinterpret_cast<const uint16_t*>(text.data());
@@ -250,8 +289,9 @@ ShapedText shapeText(const std::u16string& text, const std::vector<StyleRun>& ru
         // カラー絵文字フォントの正立セグメントは横方向でシェイプする（HarfBuzz は縦方向で ZWJ シーケンスや
         // 国旗の結合を作れない）。置くときに列の中心へ正立で置く
         const bool emojiUpright = vertical && seg.upright && seg.face->descriptor().color;
+        const bool rtl = (seg.level & 1) != 0;
         hb_buffer_set_direction(buffer, (vertical && seg.upright && !emojiUpright) ? HB_DIRECTION_TTB
-                                                                                   : HB_DIRECTION_LTR);
+                                                                                   : (rtl ? HB_DIRECTION_RTL : HB_DIRECTION_LTR));
         if (!style.language.empty()) {
             hb_buffer_set_language(buffer, hb_language_from_string(style.language.c_str(), -1));
         }
@@ -274,17 +314,29 @@ ShapedText shapeText(const std::u16string& text, const std::vector<StyleRun>& ru
         const float advScale = vertical ? (seg.upright ? style.scaleY : style.scaleX) : style.scaleX;
         const float blockScale = vertical ? (seg.upright ? style.scaleX : style.scaleY) : style.scaleY;
 
+        // クラスタ（同じ cluster 値のグリフの並び）。RTL は HarfBuzz が視覚順（左から右）で返すので、
+        // 論理順（後ろから）に並べ替えて置く。行を確定したあと、レベルで視覚順に並べ直す
+        std::vector<std::pair<unsigned int, unsigned int>> groups;
         for (unsigned int i = 0; i < n;) {
             unsigned int j = i;
             while (j + 1 < n && info[j + 1].cluster == info[i].cluster) ++j;
+            groups.emplace_back(i, j);
+            i = j + 1;
+        }
+        if (rtl) std::reverse(groups.begin(), groups.end());
+        for (const auto& grp : groups) {
+            const unsigned int i = grp.first;
+            const unsigned int j = grp.second;
 
             ShapedCluster sc;
             sc.glyphStart = static_cast<uint32_t>(result.glyphs.size());
             sc.charStart = info[i].cluster;
-            sc.charEnd = (j + 1 < n) ? info[j + 1].cluster : seg.end;
+            if (rtl) sc.charEnd = (i > 0) ? info[i - 1].cluster : seg.end;
+            else     sc.charEnd = (j + 1 < n) ? info[j + 1].cluster : seg.end;
             sc.origin = pen;
             sc.upright = seg.upright;
             sc.styleIndex = seg.styleIndex;
+            sc.level = seg.level;
             sc.charClass = text::getCharClass(text::codePointAt(text, sc.charStart));
 
             Pt clusterAdvance = 0.0f;
@@ -348,7 +400,6 @@ ShapedText shapeText(const std::u16string& text, const std::vector<StyleRun>& ru
             sc.glyphCount = static_cast<uint32_t>(result.glyphs.size()) - sc.glyphStart;
             sc.advance = clusterAdvance;
             result.clusters.push_back(sc);
-            i = j + 1;
         }
 
         if (vertical && !seg.upright) {

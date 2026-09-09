@@ -145,7 +145,12 @@ CharClass getCharClass(char32_t cp) {
     // 欧文用文字
     if (cp >= 0x0021 && cp <= 0x007E) return CharClass::Western;
     if (cp >= 0x00C0 && cp <= 0x024F) return CharClass::Western;
-    if (cp >= 0x0370 && cp <= 0x058F) return CharClass::Western;   // ギリシャ・キリル
+    if (cp >= 0x0250 && cp <= 0x02AF) return CharClass::Western;   // IPA
+    if (cp >= 0x0370 && cp <= 0x058F) return CharClass::Western;   // ギリシャ・キリル・アルメニア
+    if (cp >= 0x0590 && cp <= 0x08FF) return CharClass::Western;   // ヘブライ・アラビア・シリア・ターナ・ンコ
+    if (cp >= 0x1E00 && cp <= 0x1EFF) return CharClass::Western;   // ラテン拡張追加
+    if (cp >= 0xFB1D && cp <= 0xFDFF) return CharClass::Western;   // ヘブライ・アラビア表示形
+    if (cp >= 0xFE70 && cp <= 0xFEFF) return CharClass::Western;
     if (cp >= 0xFF21 && cp <= 0xFF3A) return CharClass::Western;   // 全角ラテン大文字
     if (cp >= 0xFF41 && cp <= 0xFF5A) return CharClass::Western;   // 全角ラテン小文字
 

@@ -37,6 +37,51 @@ void computeExtraLeading(LineBox& line, Pt pitch, bool vertical) {
     line.extraAfter = std::max(0.0f, bottom - pitch * 0.5f);
 }
 
+/**
+ * UAX #9 L2: 行の中の箱・グルーをレベルで視覚順に並べ替え、グリフの inline_ を付け直す。
+ * グルーのレベルは直前の箱（行頭なら直後の箱）に従う
+ */
+template <class Piece>
+void reorderBidi(LineBox& line, std::vector<Piece>& pieces, int paragraphLevel) {
+    // グルーにレベルを与える
+    int lastLevel = -1;
+    for (Piece& p : pieces) {
+        if (p.box) lastLevel = p.level;
+        else if (p.level < 0 && lastLevel >= 0) p.level = lastLevel;
+    }
+    for (size_t i = pieces.size(); i-- > 0;) {
+        if (pieces[i].level < 0) pieces[i].level = (i + 1 < pieces.size()) ? pieces[i + 1].level : paragraphLevel;
+    }
+    int maxLevel = 0, minOdd = 255;
+    for (const Piece& p : pieces) {
+        maxLevel = std::max(maxLevel, p.level);
+        if (p.level & 1) minOdd = std::min(minOdd, p.level);
+    }
+    if (maxLevel == 0) return;
+    std::vector<size_t> order(pieces.size());
+    for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+    const int lowest = std::min(minOdd, maxLevel);
+    for (int lvl = maxLevel; lvl >= lowest && lvl >= 1; --lvl) {
+        size_t i = 0;
+        while (i < order.size()) {
+            if (pieces[order[i]].level < lvl) { ++i; continue; }
+            size_t j = i;
+            while (j < order.size() && pieces[order[j]].level >= lvl) ++j;
+            std::reverse(order.begin() + static_cast<ptrdiff_t>(i), order.begin() + static_cast<ptrdiff_t>(j));
+            i = j;
+        }
+    }
+    Pt v = 0.0f;
+    for (size_t k : order) {
+        const Piece& p = pieces[k];
+        const Pt delta = v - p.start;
+        if (p.box && delta != 0.0f) {
+            for (size_t g = p.glyphBegin; g < p.glyphEnd; ++g) line.glyphs[g].inline_ += delta;
+        }
+        v += p.width;
+    }
+}
+
 } // namespace
 
 dl::Group objectGroup(const obj::ObjectResult& ob, const Rect& box, bool sideways) {
@@ -268,7 +313,7 @@ ParagraphFragment ParagraphLayouter::layoutOnce(const Paragraph& para, WritingMo
             const std::vector<Annotation> anns = clipAnnotations(para.annotations, pos, trimmed);
 
             ShapeContext sctx{fonts_, wm, para.style.orientation, &frag.styles, &images, &imageSizes, &objects,
-                              &frag.placeholders};
+                              &frag.placeholders, para.style.direction};
             const ShapedText shaped = shapeText(sub, runs, sctx);
 
             ItemBuildContext ictx{fonts_, wm, para.style.orientation, &frag.styles, &base,
@@ -303,24 +348,37 @@ ParagraphFragment ParagraphLayouter::layoutOnce(const Paragraph& para, WritingMo
                     line.hanging = true;
                     line.hangWidth = -items[br.itemEnd].width;
                 }
+                // RTL の段落: 一字下げは終端側（右）に付くので行頭はずらさない（行長は短くなっている）。Start / End は入れ替わる
+                const bool rtlPara = (shaped.paragraphLevel & 1) != 0;
+                if (rtlPara) line.indent = 0.0f;
                 // 両端揃え以外の揃え
                 if (!bo.justify) {
                     const Pt slack = br.shape.length - br.naturalWidth;
-                    if (para.style.align == Align::End) line.indent += slack;
-                    else if (para.style.align == Align::Center) line.indent += slack * 0.5f;
+                    Align align = para.style.align;
+                    if (rtlPara && align == Align::Start) align = Align::End;
+                    else if (rtlPara && align == Align::End) align = Align::Start;
+                    if (align == Align::End) line.indent += slack;
+                    else if (align == Align::Center) line.indent += slack * 0.5f;
                 }
 
                 Pt v = 0.0f;
                 // 行頭・行末のルビの掛かり抑制用: Box に付いた注記グリフ（ルビ・圏点）の範囲
                 std::vector<std::pair<size_t, size_t>> attached;
+                // 双方向の並べ替え用: 行の中の箱とグルーの位置・幅・レベル・グリフの範囲
+                struct Piece { Pt start; Pt width; int level; bool box; size_t glyphBegin; size_t glyphEnd; };
+                std::vector<Piece> pieces;
+                const bool needReorder = shaped.bidi || (shaped.paragraphLevel & 1);
                 for (uint32_t i = br.itemStart; i < br.itemEnd; ++i) {
                     const LineItem& item = items[i];
                     if (item.isGlue()) {
-                        v += item.natural +
-                             (br.ratio >= 0.0f ? br.ratio * item.stretch : br.ratio * item.shrink);
+                        const Pt gw = item.natural +
+                                      (br.ratio >= 0.0f ? br.ratio * item.stretch : br.ratio * item.shrink);
+                        if (needReorder) pieces.push_back(Piece{v, gw, item.level, false, 0, 0});
+                        v += gw;
                         continue;
                     }
                     if (!item.isBox()) continue;
+                    const size_t pieceGlyphBegin = line.glyphs.size();
 
                     const ShapedCluster& cluster = shaped.clusters[item.clusterIndex];
                     if (!item.ownGlyphs) {
@@ -345,9 +403,13 @@ ParagraphFragment ParagraphLayouter::layoutOnce(const Paragraph& para, WritingMo
                     if (!item.ownGlyphs && !item.glyphs.empty()) attached.emplace_back(attBegin, line.glyphs.size());
                     line.blockMin = std::min(line.blockMin, item.extentMin);
                     line.blockMax = std::max(line.blockMax, item.extentMax);
-                    line.charEnd = pos + cluster.charEnd;
+                    line.charEnd = std::max(line.charEnd, pos + cluster.charEnd);
+                    if (needReorder) {
+                        pieces.push_back(Piece{v, item.width, cluster.level, true, pieceGlyphBegin, line.glyphs.size()});
+                    }
                     v += item.width;
                 }
+                if (needReorder && !pieces.empty()) reorderBidi(line, pieces, shaped.paragraphLevel);
                 // 行頭・行末ではルビを行の外へ掛けない（JLReq 3.3.6）: 行からはみ出す注記はそのぶん内側へずらす
                 // （行の途中の掛かりは隣の字の上なので触らない）
                 for (const auto& [b, e] : attached) {
