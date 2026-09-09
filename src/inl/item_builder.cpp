@@ -13,6 +13,7 @@
 
 #include "typeset/inl/line_breaker.hpp"
 #include "typeset/inl/shaper.hpp"
+#include "typeset/text/hyphenation.hpp"
 #include "typeset/text/line_break.hpp"
 #include "typeset/text/utf.hpp"
 
@@ -766,6 +767,66 @@ std::vector<LineItem> buildLineItems(const ShapedText& shaped,
         const Pt next = (std::floor(pos / unit + 1e-4f) + 1.0f) * unit;
         return next - pos;
     };
+    // --- 欧文のハイフネーション: 単語の中で切ってよいクラスタに印を付ける ---
+    // hyphenAt[ci] = そのクラスタの手前で切ってよい（行末にハイフンが出る）
+    std::vector<uint8_t> hyphenAt(clusterCount, 0);
+    if (ctx.wrap != WrapMode::None) {
+        for (uint32_t ci = 0; ci < clusterCount; ++ci) {
+            if (skipped[ci]) continue;
+            const ShapedCluster& c = shaped.clusters[ci];
+            // ソフトハイフンは辞書が無くても常に分割位置。字面は出さず、次の文字の手前で切る
+            // （ソフトハイフン自体は前の行に残るが幅 0 なので見えない）
+            if (c.charStart < shaped.sourceText.size() &&
+                text::codePointAt(shaped.sourceText, c.charStart) == text::kSoftHyphen) {
+                for (uint32_t next = ci + 1; next < clusterCount; ++next) {
+                    if (skipped[next]) continue;
+                    hyphenAt[next] = 1;
+                    break;
+                }
+            }
+        }
+        if (ctx.hyphenation) {
+            for (uint32_t ci = 0; ci < clusterCount;) {
+                if (skipped[ci] || !text::isWestern(shaped.clusters[ci].charClass)) { ++ci; continue; }
+                // 単語（欧文の文字が続く範囲。数字・記号で切れる）
+                uint32_t end = ci;
+                std::u32string word;
+                std::vector<uint32_t> clusterOf;      // 単語の k 文字目 → クラスタ番号
+                while (end < clusterCount && !skipped[end] &&
+                       text::isWestern(shaped.clusters[end].charClass)) {
+                    const size_t at = shaped.clusters[end].charStart;
+                    if (at >= shaped.sourceText.size()) break;
+                    const char32_t cp = text::codePointAt(shaped.sourceText, at);
+                    if (shaped.clusters[end].charClass == text::CharClass::Digit || cp == text::kSoftHyphen) break;
+                    word += cp;
+                    clusterOf.push_back(end);
+                    ++end;
+                }
+                if (word.size() >= 4) {
+                    const uint32_t si = shaped.clusters[ci].styleIndex;
+                    const std::string language = si < ctx.styles->size() ? (*ctx.styles)[si].language : std::string();
+                    if (const text::Hyphenator* h = ctx.hyphenation->find(language)) {
+                        for (size_t k : h->hyphenate(word, ctx.hyphenMinLeft, ctx.hyphenMinRight)) {
+                            if (k < clusterOf.size()) hyphenAt[clusterOf[k]] = 1;
+                        }
+                    }
+                }
+                ci = std::max(end, ci + 1);
+            }
+        }
+    }
+    // ハイフンの箱（行末に出すグリフ）。スタイルごとに 1 回だけ組む
+    std::map<uint32_t, std::pair<Pt, std::vector<PlacedGlyph>>> hyphenBoxes;
+    auto hyphenBox = [&](uint32_t styleIndex) -> const std::pair<Pt, std::vector<PlacedGlyph>>& {
+        auto it = hyphenBoxes.find(styleIndex);
+        if (it != hyphenBoxes.end()) return it->second;
+        const TextStyle& st = styleIndex < ctx.styles->size() ? (*ctx.styles)[styleIndex] : *ctx.baseStyle;
+        const ShapedText sh = shapeText(u"-", st, ctx.fonts, ctx.writingMode, ctx.orientation);
+        std::vector<PlacedGlyph> glyphs = sh.glyphs;
+        for (PlacedGlyph& g : glyphs) g.styleIndex = styleIndex;
+        return hyphenBoxes.emplace(styleIndex, std::make_pair(sh.advance, std::move(glyphs))).first->second;
+    };
+
     // MoveTo 注記（クラスタ番号 → 位置）
     std::vector<Pt> moveTo(clusterCount, -1.0f);
     for (const Annotation& a : annotations) {
@@ -837,7 +898,14 @@ std::vector<LineItem> buildLineItems(const ShapedText& shaped,
         }
         const Pt boxWidth = bodyWidths[ci];
 
-        if (prevWasBox) {
+        // ハイフネーションの位置（辞書またはソフトハイフン）: 単語の途中なのでアキは入れず、
+        // 「切ったらハイフンが出る」Penalty だけ置く
+        if (prevWasBox && hyphenAt[ci] && !noBreak[ci]) {
+            const auto& hb = hyphenBox(cluster.styleIndex);
+            LineItem p = LineItem::penaltyItem(ctx.hyphenPenalty, hb.first, cluster.charStart);
+            p.breakGlyphs = hb.second;
+            items.push_back(std::move(p));
+        } else if (prevWasBox) {
             const bool latinBoundary =
                 (text::isJapanese(prevClass) && text::isWestern(spacingClass)) ||
                 (text::isWestern(prevClass) && text::isJapanese(spacingClass));
@@ -878,6 +946,22 @@ std::vector<LineItem> buildLineItems(const ShapedText& shaped,
             }
         }
         naturalPos += boxWidth;
+
+        // ソフトハイフンは分割位置を示すだけで、字面は出さない
+        if (compIdx == kNone && cluster.charStart < shaped.sourceText.size() &&
+            text::codePointAt(shaped.sourceText, cluster.charStart) == text::kSoftHyphen) {
+            LineItem soft = LineItem::box(0.0f, ci, cluster.charStart);
+            soft.ownGlyphs = true;
+            items.push_back(std::move(soft));
+            prevWasBox = true;
+            prevProportional = proportional;
+            prevCharBegin = cluster.charStart;
+            prevClass = prevClass;      // 直前の文字クラスを保つ（単語の続きとして扱う）
+            prevBoxWidth = 0.0f;
+            prevEm = em;
+            prevCharEnd = cluster.charEnd;
+            continue;
+        }
 
         LineItem box = LineItem::box(boxWidth, ci, cluster.charStart);
         if (compIdx != kNone) {

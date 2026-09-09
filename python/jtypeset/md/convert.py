@@ -73,6 +73,8 @@ class Options:
     writing: str = "horizontal"       # horizontal / vertical
     direction: str = "auto"           # auto / ltr / rtl（段落の基底方向。行内の双方向は常に UAX #9）
     wrap: str = "mixed"               # mixed / char / word / none（折返しの方式）
+    hyphenation: Any = None           # 欧文のハイフネーション: パターンファイルのパス、または {言語: パス}
+    lang: str = "ja"                  # 本文の言語（BCP47）。ハイフネーションと字形の選択に使う
     kinsoku: str = "strict"           # strict / normal / loose（禁則の強さ）
     ruby_offset: float = 0.0          # ルビと親文字の間隔（親文字の em）
     columns: int = 1
@@ -257,6 +259,7 @@ class Converter:
     def _setup_styles(self) -> None:
         o = self.opts
         self.body = ts.TextStyle(o.font_body, o.size)
+        self.body.language = o.lang
         self.mono = ts.TextStyle(o.font_mono, o.size * 0.9)
         self.small = ts.TextStyle(o.font_body, o.size * 0.8)
         self.head_styles = {}
@@ -265,6 +268,22 @@ class Converter:
             st.font.weight = 600
             self.head_styles[level] = st
         direction = {"ltr": ts.Direction.LTR, "rtl": ts.Direction.RTL}.get(str(o.direction).lower(), ts.Direction.AUTO)
+        # 欧文のハイフネーション（TeX のパターン）。辞書は Converter が持ち続ける
+        self.hyphenation = None
+        if o.hyphenation:
+            spec = o.hyphenation
+            if isinstance(spec, str):
+                spec = {"en": spec}
+            self.hyphenation = ts.HyphenationDictionary()
+            for lang, path in spec.items():
+                full = path if os.path.isabs(path) else os.path.join(self.base_dir, path)
+                if not os.path.exists(full):
+                    full = path
+                n = self.hyphenation.for_language(str(lang)).add_pattern_file(full)
+                if n == 0:
+                    self.warnings.append(f"hyphenation patterns not loaded: {path}")
+            if self.hyphenation.empty():
+                self.hyphenation = None
         wrap = {"char": ts.WrapMode.CHAR, "word": ts.WrapMode.WORD, "none": ts.WrapMode.NONE}.get(
             str(o.wrap).lower(), ts.WrapMode.MIXED)
         kinsoku = {"normal": ts.KinsokuLevel.NORMAL, "loose": ts.KinsokuLevel.LOOSE}.get(
@@ -272,9 +291,11 @@ class Converter:
 
         def tune(ps: "ts.ParagraphStyle") -> "ts.ParagraphStyle":
             ps.direction = direction
-            if wrap != ts.WrapMode.MIXED:
+            if wrap != ts.WrapMode.MIXED or self.hyphenation is not None:
                 bo = ps.line_break
                 bo.wrap = wrap
+                if self.hyphenation is not None:
+                    bo.hyphenation = self.hyphenation
                 ps.line_break = bo
             if kinsoku != ts.KinsokuLevel.STRICT:
                 sp = ps.spacing

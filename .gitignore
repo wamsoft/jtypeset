@@ -11,5 +11,6 @@ output*.pdf
 output*.svg
 data/*.ttf
 data/*.otf
+data/*.tex
 build_configure.log
 dist/

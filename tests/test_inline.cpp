@@ -13,6 +13,7 @@
 #include "typeset/inl/shaper.hpp"
 #include "typeset/inl/tag_parser.hpp"
 #include "typeset/text/char_class.hpp"
+#include "typeset/text/hyphenation.hpp"
 #include "typeset/text/line_break.hpp"
 #include "typeset/text/utf.hpp"
 
@@ -1843,4 +1844,136 @@ TEST_CASE("tag parser: the parsed paragraph lays out with its annotations") {
     REQUIRE(phs.size() == 1);
     CHECK(phs[0].id == "g");
     CHECK(phs[0].rect.w == doctest::Approx(20.0f));
+}
+
+TEST_CASE("hyphenation: Liang patterns, exceptions and soft hyphens split words at line ends") {
+    // --- パターンの読み込みと分割位置 ---
+    text::Hyphenator h;
+    // TeX の書式（\patterns{} と \hyphenation{}）
+    const size_t n = h.addPatterns(
+        "% comment line\n"
+        "\\patterns{\n"
+        "hy3ph\n"
+        "he2n\n"
+        "hena4\n"
+        "1na\n"
+        "4tion\n"
+        "na1t\n"
+        "}\n"
+        "\\hyphenation{ as-so-ciate }\n");
+    CHECK(n == 6);
+    CHECK(h.patternCount() == 6);
+    CHECK(!h.empty());
+    // 例外は綴りのとおり
+    CHECK(h.hyphenate(U"associate", 2, 3) == std::vector<size_t>{2, 4});
+    CHECK(h.hyphenate(U"ASSOCIATE", 2, 3) == std::vector<size_t>{2, 4});
+    // 短すぎる語は切らない
+    CHECK(h.hyphenate(U"cat", 2, 3).empty());
+    // minLeft / minRight を守る
+    for (size_t k : h.hyphenate(U"hyphenation", 2, 3)) {
+        CHECK(k >= 2);
+        CHECK(11 - k >= 3);
+    }
+    // 実データがあれば有名な例で確かめる
+    {
+        text::Hyphenator en;
+        if (en.addPatternFile("data/hyph-en-us.tex") > 1000) {
+            // hyph-en-us での結果（TeX82 の元パターンとは違い hy-phen-ation）。Python の参照実装と一致
+            CHECK(en.hyphenate(U"hyphenation", 2, 3) == std::vector<size_t>{2, 6});
+            CHECK(en.hyphenate(U"typesetting", 2, 3) == std::vector<size_t>{4, 7});
+            CHECK(en.hyphenate(U"representation", 2, 3) == std::vector<size_t>{3, 5, 8, 10});
+            CHECK(en.hyphenate(U"a", 2, 3).empty());
+        } else {
+            MESSAGE("data/hyph-en-us.tex not found; skipping the real pattern check");
+        }
+    }
+
+    // --- 言語ごとの辞書 ---
+    text::HyphenationDictionary dict;
+    dict.forLanguage("en").addPatterns("\\patterns{ hy3ph he2n hena4 1na 4tion na1t }");
+    CHECK(dict.find("en") != nullptr);
+    CHECK(dict.find("en-US") != nullptr);        // 主言語で引ける
+    CHECK(dict.find("de") == nullptr);
+    CHECK(dict.find("") == nullptr);
+
+    // --- 組版: 単語の途中で切れてハイフンが出る ---
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping the layout part"); return; }
+    text::HyphenationDictionary real;
+    if (real.forLanguage("en").addPatternFile("data/hyph-en-us.tex") < 1000) {
+        MESSAGE("data/hyph-en-us.tex not found; skipping the layout part");
+        return;
+    }
+    TextStyle st = fx.style(10.0f);
+    st.language = "en";
+    inl::ParagraphLayouter layouter(fx.fonts);
+    const inl::ConstantLineShape shape(60.0f);
+    const std::u16string text = u"The hyphenation of typesetting terminology";
+
+    auto layout = [&](bool hyphenate) {
+        inl::Paragraph p = inl::Paragraph::plain(text, st);
+        p.style.align = Align::Start;
+        p.style.lineBreak.justify = false;
+        if (hyphenate) p.style.lineBreak.hyphenation = &real;
+        return layouter.layout(p, WritingMode::HorizontalTb, shape);
+    };
+    const inl::ParagraphFragment plain = layout(false);
+    const inl::ParagraphFragment hyph = layout(true);
+
+    // ハイフネーション無しでは長い単語が行長を超える
+    Pt longestPlain = 0.0f, longestHyph = 0.0f;
+    for (const inl::LineBox& l : plain.lines) longestPlain = std::max(longestPlain, l.naturalLength);
+    for (const inl::LineBox& l : hyph.lines) longestHyph = std::max(longestHyph, l.naturalLength);
+    CHECK(longestPlain > 60.0f);
+    CHECK(longestHyph <= 60.0f + 0.01f);
+
+    // 割れた行にはハイフンのグリフが増える（本文には無い文字）
+    size_t hyphenatedLines = 0;
+    for (const inl::LineBox& l : hyph.lines) if (l.hyphenated) ++hyphenatedLines;
+    CHECK(hyphenatedLines >= 1);
+    for (const inl::LineBox& l : hyph.lines) {
+        if (!l.hyphenated) continue;
+        // 行末のグリフは本文の最後の文字より後ろに置かれている
+        Pt maxInline = 0.0f;
+        for (const inl::PlacedGlyph& g : l.glyphs) maxInline = std::max(maxInline, g.inline_);
+        CHECK(l.glyphs.back().inline_ == doctest::Approx(maxInline));
+        // 行の文字範囲は語の途中で終わる（次の行が同じ語の続き）
+        CHECK(l.charEnd < text.size());
+        CHECK(text[l.charEnd] != u' ');
+    }
+    // 文字は 1 つも失われない
+    CHECK(hyph.complete);
+    for (size_t i = 0; i + 1 < hyph.lines.size(); ++i) {
+        // 語の途中なら連続、語間で切れたときは空白 1 つぶん飛ぶ
+        CHECK(hyph.lines[i].charEnd <= hyph.lines[i + 1].charStart);
+        CHECK(hyph.lines[i + 1].charStart - hyph.lines[i].charEnd <= 1);
+    }
+
+    // --- ソフトハイフン: 辞書が無くても切れる。字面は出ない ---
+    {
+        TextStyle plainStyle = fx.style(10.0f);
+        plainStyle.language = "en";
+        inl::Paragraph p = inl::Paragraph::plain(u"aaaa\u00ADbbbbbbbbbb", plainStyle);
+        p.style.align = Align::Start;
+        p.style.lineBreak.justify = false;
+        const inl::ConstantLineShape narrow(40.0f);
+        const inl::ParagraphFragment f = layouter.layout(p, WritingMode::HorizontalTb, narrow);
+        REQUIRE(f.lines.size() >= 2);
+        CHECK(f.lines[0].hyphenated);
+        CHECK(f.lines[0].charEnd == 5);      // 見えないソフトハイフンまでが 1 行目
+        // ソフトハイフンそのものは描かない: 1 行目のグリフは a×4 ＋ ハイフン 1 つ
+        CHECK(f.lines[0].glyphs.size() == 5);
+        // ソフトハイフンが切れなかった場合でも幅を食わない
+        inl::Paragraph q = inl::Paragraph::plain(u"aa\u00ADaa", plainStyle);
+        q.style.align = Align::Start;
+        q.style.lineBreak.justify = false;
+        const inl::ConstantLineShape wide(200.0f);
+        const inl::ParagraphFragment fq = layouter.layout(q, WritingMode::HorizontalTb, wide);
+        REQUIRE(fq.lines.size() == 1);
+        CHECK(!fq.lines[0].hyphenated);
+        CHECK(fq.lines[0].glyphs.size() == 4);
+        const inl::ParagraphFragment noSoft = layouter.layout(
+            inl::Paragraph::plain(u"aaaa", plainStyle), WritingMode::HorizontalTb, wide);
+        CHECK(fq.lines[0].naturalLength == doctest::Approx(noSoft.lines[0].naturalLength));
+    }
 }

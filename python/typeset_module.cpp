@@ -22,6 +22,7 @@
 #include "typeset/image/image.hpp"
 #include "typeset/inl/paragraph.hpp"
 #include "typeset/inl/tag_parser.hpp"
+#include "typeset/text/hyphenation.hpp"
 #include "typeset/obj/object.hpp"
 #include "typeset/obj/svg_import.hpp"
 #ifdef TYPESET_HAS_MICROTEX
@@ -368,10 +369,38 @@ Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
         .def_readwrite("line_start_allowed", &SpacingOptions::lineStartAllowed, "行頭禁則から外す文字")
         .def_readwrite("line_end_prohibited", &SpacingOptions::lineEndProhibited, "行末に置かない文字を足す")
         .def_readwrite("line_end_allowed", &SpacingOptions::lineEndAllowed, "行末禁則から外す文字");
+    py::class_<text::Hyphenator>(m, "Hyphenator",
+                                 "欧文のハイフネーション（Liang のパターン）。TeX の hyph-*.tex を読ませて使う")
+        .def(py::init<>())
+        .def("add_patterns", &text::Hyphenator::addPatterns, py::arg("text"),
+             "TeX のパターン（\patterns{} / \hyphenation{}）または 1 行 1 パターンの素のリストを読む")
+        .def("add_pattern_file", &text::Hyphenator::addPatternFile, py::arg("path"))
+        .def("add_exception", &text::Hyphenator::addException, py::arg("word"), "as-so-ciate のような例外を足す")
+        .def("pattern_count", &text::Hyphenator::patternCount)
+        .def("empty", &text::Hyphenator::empty)
+        .def("hyphenate",
+             [](const text::Hyphenator& h, const std::u32string& word, int minLeft, int minRight) {
+                 return h.hyphenate(word, minLeft, minRight);
+             },
+             py::arg("word"), py::arg("min_left") = 2, py::arg("min_right") = 3,
+             "分割位置（先頭から k 文字目の後ろで切ってよい k の列）");
+    py::class_<text::HyphenationDictionary>(m, "HyphenationDictionary",
+                                            "言語ごとのハイフネーションのパターン。TextStyle.language で引く")
+        .def(py::init<>())
+        .def("for_language", &text::HyphenationDictionary::forLanguage, py::arg("language"),
+             py::return_value_policy::reference_internal, "その言語の Hyphenator（無ければ作る）")
+        .def("find", &text::HyphenationDictionary::find, py::arg("language"),
+             py::return_value_policy::reference_internal)
+        .def("empty", &text::HyphenationDictionary::empty);
     py::class_<BreakOptions>(m, "BreakOptions", "行分割の方法（Greedy / Knuth–Plass）と両端揃え")
         .def(py::init<>())
         .def_readwrite("strategy", &BreakOptions::strategy)
         .def_readwrite("wrap", &BreakOptions::wrap, "折返しの方式（WrapMode）")
+        .def_readwrite("hyphenation", &BreakOptions::hyphenation,
+                       "欧文のハイフネーション辞書（HyphenationDictionary）。所有しないので、組版の間は生かしておくこと")
+        .def_readwrite("hyphen_penalty", &BreakOptions::hyphenPenalty)
+        .def_readwrite("hyphen_min_left", &BreakOptions::hyphenMinLeft)
+        .def_readwrite("hyphen_min_right", &BreakOptions::hyphenMinRight)
         .def_readwrite("justify", &BreakOptions::justify)
         .def_readwrite("tolerance", &BreakOptions::tolerance)
         .def_readwrite("line_penalty", &BreakOptions::linePenalty);

@@ -409,7 +409,8 @@ ParagraphFragment ParagraphLayouter::layoutOnce(const Paragraph& para, WritingMo
 
             ItemBuildContext ictx{fonts_, wm, para.style.orientation, &frag.styles, &base,
                                   base.letterSpacing, para.style.preserveSpaces, bo.wrap,
-                                  &para.style.tabStops, para.style.tabWidth};
+                                  &para.style.tabStops, para.style.tabWidth,
+                                  bo.hyphenation, bo.hyphenPenalty, bo.hyphenMinLeft, bo.hyphenMinRight};
             const std::vector<LineItem> items =
                 buildLineItems(shaped, anns, para.style.spacing, ictx);
 
@@ -443,6 +444,9 @@ ParagraphFragment ParagraphLayouter::layoutOnce(const Paragraph& para, WritingMo
                     line.hanging = true;
                     line.hangWidth = -items[br.itemEnd].width;
                 }
+                // ハイフネーションで切れた行は、行末にハイフンを足す
+                const bool hyphenated = br.itemEnd < items.size() && items[br.itemEnd].isPenalty() &&
+                                        !items[br.itemEnd].breakGlyphs.empty();
                 // RTL の段落: 一字下げは終端側（右）に付くので行頭はずらさない（行長は短くなっている）。Start / End は入れ替わる
                 const bool rtlPara = (shaped.paragraphLevel & 1) != 0;
                 if (rtlPara) line.indent = 0.0f;
@@ -503,6 +507,15 @@ ParagraphFragment ParagraphLayouter::layoutOnce(const Paragraph& para, WritingMo
                         pieces.push_back(Piece{v, item.width, cluster.level, true, pieceGlyphBegin, line.glyphs.size()});
                     }
                     v += item.width;
+                }
+                if (hyphenated) {
+                    for (PlacedGlyph glyph : items[br.itemEnd].breakGlyphs) {
+                        glyph.inline_ += v;
+                        glyph.charIndex = static_cast<uint32_t>(line.charEnd);
+                        line.glyphs.push_back(std::move(glyph));
+                    }
+                    line.hyphenated = true;
+                    v += items[br.itemEnd].width;
                 }
                 if (needReorder && !pieces.empty()) reorderBidi(line, pieces, shaped.paragraphLevel);
                 // 行頭・行末ではルビを行の外へ掛けない（JLReq 3.3.6）: 行からはみ出す注記はそのぶん内側へずらす

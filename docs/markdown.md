@@ -84,6 +84,8 @@ landscape: false
 writing: horizontal       # horizontal / vertical
 direction: auto           # auto / ltr / rtl（段落の基底方向。行内のアラビア文字・ヘブライ文字は常に双方向で並ぶ）
 wrap: mixed               # mixed / char / word / none（折返し: 既定は和文が字ごと・欧文が語ごと）
+lang: ja                  # 本文の言語（BCP47）
+hyphenation: hyph-en-us.tex   # 欧文のハイフネーション（TeX のパターン。{en: 〜.tex} と言語ごとにも書ける）
 kinsoku: strict           # strict / normal / loose（禁則の強さ。狭い段では normal / loose で行末が揃いやすい）
 ruby-offset: 0            # ルビと親文字の間隔（親文字の em）
 columns: 1

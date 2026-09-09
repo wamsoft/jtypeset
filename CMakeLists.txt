@@ -55,6 +55,7 @@ set(TYPESET_SOURCES
     src/text/char_class.cpp
     src/text/spacing_table.cpp
     src/text/orientation.cpp
+    src/text/hyphenation.cpp
     src/text/line_break.cpp
     # inl: インライン組版
     src/inl/shaper.cpp

@@ -150,6 +150,7 @@ struct LineBox {
     size_t charEnd = 0;
     bool hanging = false;               ///< 行末の約物を版面外へ出した（ぶら下げた）行か
     Pt hangWidth = 0.0f;
+    bool hyphenated = false;            ///< 欧文の単語をハイフンで割った行か（行末にハイフンのグリフが入る）
     int lineIndex = 0;                  ///< LineShapeProvider の行番号
     Pt indent = 0.0f;                   ///< 行頭の下げ（一字下げ＋揃えによるシフト）
     bool paragraphEnd = false;          ///< この行で（改行または本文の終わりで）段落が終わる

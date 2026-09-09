@@ -127,11 +127,40 @@ def extract_from_zip(data: bytes, inner_path: str) -> bytes:
         )
 
 
+# ハイフネーションのパターン（TeX の hyph-utf8）。欧文のハイフネーションのテスト・サンプル用。
+# ライセンスがフォントと別なので同梱せず、ここで取る
+PATTERNS = [
+    (
+        "hyph-en-us.tex",
+        "https://raw.githubusercontent.com/hyphenation/tex-hyphen/master/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-en-us.tex",
+    ),
+]
+
+
+def download_patterns():
+    """ハイフネーションのパターンを取る（失敗しても致命的ではない）"""
+    for out_name, url in PATTERNS:
+        out_file = os.path.join(DATA_DIR, out_name)
+        if os.path.exists(out_file):
+            print(f"[SKIP] {out_name} (already exists)")
+            continue
+        print(f"[GET]  {out_name}")
+        try:
+            data = download_url(url)
+            with open(out_file, "wb") as f:
+                f.write(data)
+            print(f"  -> Saved {out_name} ({len(data) / 1024:.0f} KB)")
+        except Exception as e:  # noqa: BLE001
+            print(f"  !! {out_name}: {e}")
+
+
 def main():
     os.makedirs(DATA_DIR, exist_ok=True)
 
     success = 0
     failed = 0
+
+    download_patterns()
 
     for out_name, url, zip_path in FONTS:
         out_file = os.path.join(DATA_DIR, out_name)

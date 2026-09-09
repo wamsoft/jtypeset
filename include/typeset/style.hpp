@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+namespace typeset::text { class HyphenationDictionary; }
+
 #include "typeset/geom.hpp"
 #include "typeset/writing_mode.hpp"
 
@@ -214,6 +216,18 @@ enum class WrapMode : uint8_t { Mixed, Char, Word, None };
 struct BreakOptions {
     LineBreakStrategy strategy = LineBreakStrategy::Greedy;
     WrapMode wrap = WrapMode::Mixed;
+
+    /**
+     * 欧文のハイフネーション辞書（言語ごとのパターン。`TextStyle::language` で引く）。
+     * nullptr なら単語内では切らない（テキスト中のソフトハイフン U+00AD は辞書が無くても常に切れる）。
+     * **所有しない**ので、組版の間は生かしておくこと
+     */
+    const text::HyphenationDictionary* hyphenation = nullptr;
+    /// 単語内で切るときのペナルティ（Knuth–Plass の demerits に効く）
+    float hyphenPenalty = 50.0f;
+    /// 行末に残す最小の文字数 / 次の行へ送る最小の文字数
+    int hyphenMinLeft = 2;
+    int hyphenMinRight = 3;
     /// 行末を揃える（グルーを伸縮させる）。false なら自然幅のまま
     bool justify = true;
     /// Knuth–Plass が許容するグルーの伸び率上限

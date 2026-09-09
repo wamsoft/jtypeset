@@ -145,6 +145,7 @@ CharClass getCharClass(char32_t cp) {
     // 欧文用文字
     if (cp >= 0x0021 && cp <= 0x007E) return CharClass::Western;
     if (cp >= 0x00C0 && cp <= 0x024F) return CharClass::Western;
+    if (cp == 0x00AD) return CharClass::Western;                   // ソフトハイフン（幅 0。分割位置を示すだけ）
     if (cp >= 0x0250 && cp <= 0x02AF) return CharClass::Western;   // IPA
     if (cp >= 0x0370 && cp <= 0x058F) return CharClass::Western;   // ギリシャ・キリル・アルメニア
     if (cp >= 0x0590 && cp <= 0x08FF) return CharClass::Western;   // ヘブライ・アラビア・シリア・ターナ・ンコ

@@ -7,6 +7,7 @@
 #include "typeset/inl/annotation.hpp"
 #include "typeset/inl/line_item.hpp"
 #include "typeset/inl/shaped.hpp"
+#include "typeset/text/hyphenation.hpp"
 #include "typeset/style.hpp"
 #include "typeset/writing_mode.hpp"
 
@@ -39,6 +40,11 @@ struct ItemBuildContext {
     /// タブストップ（空なら tabWidth × em ごと）
     const std::vector<TabStop>* tabStops = nullptr;
     int tabWidth = 4;
+    /// 欧文のハイフネーション（BreakOptions から。nullptr ならソフトハイフンだけ）
+    const text::HyphenationDictionary* hyphenation = nullptr;
+    float hyphenPenalty = 50.0f;
+    int hyphenMinLeft = 2;
+    int hyphenMinRight = 3;
 };
 
 /**

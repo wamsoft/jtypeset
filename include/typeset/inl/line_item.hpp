@@ -67,6 +67,9 @@ struct LineItem {
     Pt extentMin = 0.0f;
     Pt extentMax = 0.0f;
 
+    /// Penalty: そこで行が終わったときに行末へ足すグリフ（ハイフネーションのハイフン）。inline_ は行末からの相対
+    std::vector<PlacedGlyph> breakGlyphs;
+
     static constexpr uint32_t kNoCluster = std::numeric_limits<uint32_t>::max();
 
     static LineItem box(Pt w, uint32_t cluster, size_t charIndex) {
