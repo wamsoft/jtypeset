@@ -85,8 +85,17 @@ public:
     /// 登録済み face（キー、または family 名で。通常ウェイト・非斜体を優先。無ければ nullptr）。必要なら開く
     std::shared_ptr<glyphware::Face> find(const std::string& keyOrFamily);
 
-    /// キー／family 名と weight / italic に最も近い face。必要なら開く
-    std::shared_ptr<glyphware::Face> select(const std::string& keyOrFamily, int weight, bool italic);
+    /// キー／family 名と weight / italic に最も近い face。必要なら開く。
+    /// バリアブルフォントなら wght 軸を weight に合わせたインスタンス（variations に他の軸も指定できる）
+    std::shared_ptr<glyphware::Face> select(const std::string& keyOrFamily, int weight, bool italic,
+                                            const std::map<std::string, float>& variations = {});
+
+    /**
+     * バリアブルフォントのインスタンス（軸の値を固定した別の Face）。同じ base と座標なら同じ Face を返す。
+     * 軸の無い face、座標が空ならそのまま base
+     */
+    std::shared_ptr<glyphware::Face> instance(const std::shared_ptr<glyphware::Face>& base,
+                                              const std::vector<glyphware::VarCoord>& coords);
 
     /**
      * FontSpec の family 列（language の置換表・宣言の languages が先）を順に見て、cp を持つ最初の face を返す。
@@ -135,10 +144,27 @@ private:
     Entry* best(const std::string& name, int weight, bool italic);
     std::shared_ptr<glyphware::Face> faceOf(Entry* e);
 
+    /// spec の weight / italic / variations を face の軸に写す（軸が無ければ base）
+    std::shared_ptr<glyphware::Face> withVariations(const std::shared_ptr<glyphware::Face>& base,
+                                                    int weight, bool italic,
+                                                    const std::map<std::string, float>& variations);
+
     std::vector<std::unique_ptr<Entry>> entries_;
     std::map<std::string, std::vector<std::string>> languageFonts_;
     std::map<const glyphware::Face*, hb_font_t*> hbFonts_;
+    /// インスタンスのキャッシュ: base の Face* ＋ 座標 → Face。base は instances_ の Face が blob 経由で保持する
+    std::map<std::pair<const glyphware::Face*, std::string>, std::shared_ptr<glyphware::Face>> instances_;
 };
+
+/// OpenType タグ（"wght"）を glyphware / HarfBuzz の 32bit タグに
+inline uint32_t makeTag(const std::string& s) {
+    uint32_t t = 0;
+    for (size_t i = 0; i < 4; ++i) t = (t << 8) | static_cast<uint8_t>(i < s.size() ? s[i] : ' ');
+    return t;
+}
+
+/// face の実効ウェイト。バリアブルフォントのインスタンスなら wght 軸の値、無ければ OS/2 の値
+int effectiveWeight(const glyphware::Face& face);
 
 /// face の unitsPerEm（取れなければ 1000）
 float unitsPerEm(const glyphware::Face& face);

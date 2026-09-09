@@ -246,7 +246,9 @@ Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
              py::arg("family"), py::arg("weight") = 400, py::arg("italic") = false)
         .def_readwrite("family", &FontSpec::family)
         .def_readwrite("weight", &FontSpec::weight)
-        .def_readwrite("italic", &FontSpec::italic);
+        .def_readwrite("italic", &FontSpec::italic)
+        .def_readwrite("variations", &FontSpec::variations,
+                       "バリアブルフォントの軸の値（{'wght': 700, 'wdth': 75}）。wght が無ければ weight が入る。辞書はコピーを返すので作って代入する");
 
     py::class_<TextStyle>(m, "TextStyle", "文字スタイル: フォント・サイズ・色・縁取り・影・層・下線・打消し線・字間・向き・平体長体・合成ボールド／斜体・ベースラインのずらし")
         .def(py::init<>())
@@ -272,6 +274,8 @@ Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
         .def_readwrite("fake_bold", &TextStyle::fakeBold)
         .def_readwrite("fake_italic", &TextStyle::fakeItalic)
         .def_readwrite("language", &TextStyle::language)
+        .def_readwrite("features", &TextStyle::features,
+                       "OpenType feature（['palt', '-liga', 'ss01'] など HarfBuzz の書式）。palt 等の字幅を変える feature を付けた文字は JLReq の約物の詰めを使わない")
         .def("copy", [](const TextStyle& s) { return TextStyle(s); });
 
     py::class_<SpacingOptions>(m, "SpacingOptions", "約物の詰め・ぶら下げ・和欧間・和字間の伸縮（JLReq のアキ量表）")

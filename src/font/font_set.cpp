@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -54,6 +55,16 @@ int weightDistance(int desired, int actual) {
     if (actual > desired) return actual - desired;
     return 1000 + (desired - actual);
 }
+
+/// 開いた Face のバイト列を指す blob（インスタンスの Face が base を生かしておく）
+class ViewBlob final : public glyphware::FontBlob {
+public:
+    explicit ViewBlob(std::shared_ptr<glyphware::Face> owner) : owner_(std::move(owner)) {}
+    const std::uint8_t* data() const noexcept override { return owner_->data(); }
+    std::size_t size() const noexcept override { return owner_->size(); }
+private:
+    std::shared_ptr<glyphware::Face> owner_;
+};
 
 std::string readFile(const std::string& path) {
     std::ifstream file(path, std::ios::binary);
@@ -235,13 +246,71 @@ std::shared_ptr<glyphware::Face> FontSet::find(const std::string& keyOrFamily) {
     return select(keyOrFamily, 400, false);
 }
 
-std::shared_ptr<glyphware::Face> FontSet::select(const std::string& keyOrFamily, int weight, bool italic) {
+std::shared_ptr<glyphware::Face> FontSet::select(const std::string& keyOrFamily, int weight, bool italic,
+                                                 const std::map<std::string, float>& variations) {
     // 開けないものが混ざっていても、次に近いものへ落ちる
     for (;;) {
         Entry* e = best(keyOrFamily, weight, italic);
         if (!e) return nullptr;
-        if (auto face = faceOf(e)) return face;
+        if (auto face = faceOf(e)) return withVariations(face, weight, italic, variations);
     }
+}
+
+std::shared_ptr<glyphware::Face> FontSet::instance(const std::shared_ptr<glyphware::Face>& base,
+                                                   const std::vector<glyphware::VarCoord>& coords) {
+    if (!base || coords.empty() || base->descriptor().axes.empty()) return base;
+    // 既定値と同じ座標だけなら base のまま
+    std::vector<glyphware::VarCoord> effective;
+    for (const glyphware::VarCoord& c : coords) {
+        float mn = 0.0f, def = 0.0f, mx = 0.0f;
+        if (!base->axisRange(c.tag, mn, def, mx)) continue;
+        const float v = std::max(mn, std::min(mx, c.value));
+        if (v != def) effective.push_back(glyphware::VarCoord{c.tag, v});
+    }
+    if (effective.empty()) return base;
+    std::sort(effective.begin(), effective.end(),
+              [](const glyphware::VarCoord& a, const glyphware::VarCoord& b) { return a.tag < b.tag; });
+    std::string key;
+    for (const glyphware::VarCoord& c : effective) key += std::to_string(c.tag) + "=" + std::to_string(c.value) + ";";
+    // base 自身がインスタンスなら、その元を base にする（blob は共有）
+    auto it = instances_.find({base.get(), key});
+    if (it != instances_.end()) return it->second;
+    auto blob = std::make_shared<ViewBlob>(base);
+    auto face = glyphware::Face::open(blob, base->descriptor().key, base->faceIndex());
+    if (!face) return base;
+    face->setVariations(effective);
+    instances_.emplace(std::make_pair(base.get(), key), face);
+    return face;
+}
+
+std::shared_ptr<glyphware::Face> FontSet::withVariations(const std::shared_ptr<glyphware::Face>& base,
+                                                         int weight, bool italic,
+                                                         const std::map<std::string, float>& variations) {
+    if (!base || base->descriptor().axes.empty()) return base;
+    std::vector<glyphware::VarCoord> coords;
+    bool hasWght = false, hasItal = false;
+    for (const auto& kv : variations) {
+        const uint32_t tag = makeTag(kv.first);
+        if (tag == makeTag("wght")) hasWght = true;
+        if (tag == makeTag("ital")) hasItal = true;
+        coords.push_back(glyphware::VarCoord{tag, kv.second});
+    }
+    float mn = 0.0f, def = 0.0f, mx = 0.0f;
+    if (!hasWght && base->axisRange(makeTag("wght"), mn, def, mx)) {
+        coords.push_back(glyphware::VarCoord{makeTag("wght"), static_cast<float>(weight)});
+    }
+    if (!hasItal && italic && base->axisRange(makeTag("ital"), mn, def, mx)) {
+        coords.push_back(glyphware::VarCoord{makeTag("ital"), 1.0f});
+    }
+    return instance(base, coords);
+}
+
+int effectiveWeight(const glyphware::Face& face) {
+    for (const glyphware::VarCoord& c : face.variations()) {
+        if (c.tag == makeTag("wght")) return static_cast<int>(std::lround(c.value));
+    }
+    const glyphware::FontDescriptor& d = face.descriptor();
+    return static_cast<int>(d.weight) > 0 ? static_cast<int>(d.weight) : (d.bold ? 700 : 400);
 }
 
 void FontSet::setLanguageFonts(const std::string& language, std::vector<std::string> families) {
@@ -283,8 +352,8 @@ std::shared_ptr<glyphware::Face> FontSet::resolve(const FontSpec& spec, char32_t
             }
             if (!e) return nullptr;
             seen.push_back(e);
-            if (covers(*e, cp)) return e->face;
-            if (!first && e->face) first = e->face;
+            if (covers(*e, cp)) return withVariations(e->face, spec.weight, spec.italic, spec.variations);
+            if (!first && e->face) first = withVariations(e->face, spec.weight, spec.italic, spec.variations);
         }
     };
     for (const std::string& name : languageFonts(language)) {
@@ -303,7 +372,7 @@ std::shared_ptr<glyphware::Face> FontSet::resolve(const FontSpec& spec, char32_t
 
 std::shared_ptr<glyphware::Face> FontSet::primary(const FontSpec& spec) {
     for (const std::string& name : spec.family) {
-        if (auto face = select(name, spec.weight, spec.italic)) return face;
+        if (auto face = select(name, spec.weight, spec.italic, spec.variations)) return face;
     }
     for (auto& up : entries_) {
         if (auto face = faceOf(up.get())) return face;

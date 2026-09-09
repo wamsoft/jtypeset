@@ -1,6 +1,7 @@
 #ifndef TYPESET_STYLE_HPP
 #define TYPESET_STYLE_HPP
 
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -23,6 +24,9 @@ struct FontSpec {
     std::vector<std::string> family;
     int weight = 400;
     bool italic = false;
+    /// バリアブルフォントの軸の値（"wght" → 700、"wdth" → 75 など、デザイン座標）。
+    /// wght を書かなくても、face に wght 軸があれば weight が入る。軸の無い face では無視される
+    std::map<std::string, float> variations;
 };
 
 /**
@@ -103,6 +107,28 @@ struct TextStyle {
 
     /// BCP47（シェイピングの言語タグ。"ja" で日本語字形が選ばれる）
     std::string language = "ja";
+
+    /// OpenType feature（HarfBuzz の書式: "palt" "+liga" "-kern" "liga=0" "ss01"）。そのまま HarfBuzz へ渡す。
+    /// palt / halt / pwid / hwid など字幅を変える feature を有効にした文字は、JLReq の約物の詰め（仮想ボディの
+    /// 半角化と約物間のアキ）を使わずフォントの送りをそのまま使う（二重に詰めない）
+    std::vector<std::string> features;
+
+    /// features に字幅を変える feature（palt / halt / pwid / hwid / vpal / vhal / twid / qwid）が有効に入っているか
+    bool hasProportionalFeature() const {
+        for (const std::string& f : features) {
+            std::string tag = f;
+            bool on = true;
+            if (!tag.empty() && (tag[0] == '+' || tag[0] == '-')) { on = tag[0] == '+'; tag = tag.substr(1); }
+            const size_t eq = tag.find('=');
+            if (eq != std::string::npos) { on = tag.substr(eq + 1) != "0"; tag = tag.substr(0, eq); }
+            const size_t br = tag.find('[');
+            if (br != std::string::npos) tag = tag.substr(0, br);
+            if (!on) continue;
+            if (tag == "palt" || tag == "halt" || tag == "pwid" || tag == "hwid" || tag == "vpal" ||
+                tag == "vhal" || tag == "twid" || tag == "qwid") return true;
+        }
+        return false;
+    }
 
     /// 実際に描く層（下から上）: shadow → layers（空なら fill / stroke の 1 層）
     std::vector<TextLayer> resolvedLayers() const {

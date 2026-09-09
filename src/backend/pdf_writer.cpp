@@ -131,7 +131,8 @@ int jpegComponentCount(const std::vector<uint8_t>& d) {
  * コンテンツストリームの CID はそのまま使える。失敗時は空文字列
  */
 std::string subsetFont(const uint8_t* data, size_t size, int faceIndex,
-                       const std::set<uint32_t>& gids) {
+                       const std::set<uint32_t>& gids,
+                       const std::vector<glyphware::VarCoord>& variations) {
     hb_blob_t* blob = hb_blob_create(reinterpret_cast<const char*>(data),
                                      static_cast<unsigned int>(size),
                                      HB_MEMORY_MODE_READONLY, nullptr, nullptr);
@@ -156,6 +157,13 @@ std::string subsetFont(const uint8_t* data, size_t size, int faceIndex,
         HB_TAG('V', 'O', 'R', 'G'), HB_TAG('k', 'e', 'r', 'n'),
     };
     for (hb_tag_t t : dropTags) hb_set_add(drop, t);
+    // バリアブルフォントは軸の値を固定した静的フォントにして埋め込む（fvar / gvar 等は落ちる）
+    if (!variations.empty()) {
+        hb_subset_input_pin_all_axes_to_default(input, face);
+        for (const glyphware::VarCoord& c : variations) {
+            hb_subset_input_pin_axis_location(input, face, c.tag, c.value);
+        }
+    }
 
     hb_face_t* out = hb_subset_or_fail(face, input);
     hb_subset_input_destroy(input);
@@ -314,6 +322,12 @@ PdfWriter::Impl::FontResource* PdfWriter::Impl::acquireFont(
         if (!desc.subfamily.empty() && desc.subfamily != "Regular") base += "-" + desc.subfamily;
     }
     if (base.empty()) base = desc.key;
+    // バリアブルフォントのインスタンスは軸の値を名前に足して区別する（同じ PostScript 名の別フォントになる）
+    for (const glyphware::VarCoord& c : face->variations()) {
+        char tag[5] = {static_cast<char>(c.tag >> 24), static_cast<char>(c.tag >> 16),
+                       static_cast<char>(c.tag >> 8), static_cast<char>(c.tag), 0};
+        base += "-" + std::string(tag) + std::to_string(static_cast<int>(std::lround(c.value)));
+    }
     res->baseFont = sanitizeName(base);
 
     if (res->data && res->dataSize > 0 && parseSfnt(res->data, res->dataSize, res->sfnt, face->faceIndex())) {
@@ -743,7 +757,8 @@ std::string PdfWriter::build() {
         std::string fontData;
         std::string baseFont = font.baseFont;
         if (impl_->subsetFonts && !font.sfnt.noSubsetting()) {
-            fontData = subsetFont(font.data, font.dataSize, font.face->faceIndex(), font.usedGlyphs);
+            fontData = subsetFont(font.data, font.dataSize, font.face->faceIndex(), font.usedGlyphs,
+                                  font.face->variations());
             if (fontData.empty()) {
                 impl_->warnings.push_back("subsetting failed, embedding the full font: " + font.baseFont);
             } else {

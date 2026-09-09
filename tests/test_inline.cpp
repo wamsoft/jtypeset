@@ -1,9 +1,12 @@
 #include <doctest/doctest.h>
 
 #include <cmath>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <variant>
 
+#include "typeset/backend/pdf_writer.hpp"
 #include "typeset/font/font_set.hpp"
 #include "typeset/inl/item_builder.hpp"
 #include "typeset/inl/paragraph.hpp"
@@ -1045,4 +1048,112 @@ TEST_CASE("measureText returns advance, extents and cluster count for one unbrok
     CHECK(latin.advance < 40.0f);
     CHECK(latin.clusterCount == 5);
     CHECK(inl::measureText(fx.fonts, u"", st).clusterCount == 0);
+}
+
+TEST_CASE("OpenType features: palt tightens punctuation and disables the JLReq body compression for that run") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+    const TextStyle plain = fx.style(10.0f);
+    TextStyle palt = plain;
+    palt.features = {"palt"};
+    CHECK(palt.hasProportionalFeature());
+    TextStyle off = plain;
+    off.features = {"-palt", "liga=0"};
+    CHECK(!off.hasProportionalFeature());
+
+    // シェイピング: palt で読点・句点・括弧の送りが 1em より短くなる
+    const inl::TextMetrics a = inl::measureText(fx.fonts, u"「猫、犬。」", plain);
+    const inl::TextMetrics b = inl::measureText(fx.fonts, u"「猫、犬。」", palt);
+    CHECK(a.advance == doctest::Approx(60.0f));
+    CHECK(b.advance < 55.0f);
+    CHECK(b.clusterCount == 6);
+
+    // 組版: palt の run は JLReq の半角化・約物のアキを使わず、シェイパーの送りの和がそのまま行長になる
+    inl::ParagraphLayouter layouter(fx.fonts);
+    const inl::ConstantLineShape shape(300.0f);
+    inl::Paragraph pp = inl::Paragraph::plain(u"「猫、犬。」", palt);
+    pp.style.align = Align::Start;
+    pp.style.lineBreak.justify = false;
+    const inl::ParagraphFragment fp = layouter.layout(pp, WritingMode::HorizontalTb, shape);
+    REQUIRE(fp.lines.size() == 1);
+    CHECK(fp.lines[0].naturalLength == doctest::Approx(b.advance).epsilon(0.01));
+    // 通常の run は JLReq どおり（始め括弧の半角化で 60 より短く、palt より長い）
+    inl::Paragraph pn = inl::Paragraph::plain(u"「猫、犬。」", plain);
+    pn.style.align = Align::Start;
+    pn.style.lineBreak.justify = false;
+    const inl::ParagraphFragment fn = layouter.layout(pn, WritingMode::HorizontalTb, shape);
+    CHECK(fn.lines[0].naturalLength < 60.0f);
+    CHECK(fn.lines[0].naturalLength > fp.lines[0].naturalLength);
+}
+
+TEST_CASE("variable fonts: weight and axis values select an instance, no fake bold, PDF pins the axes") {
+    font::FontSet fonts;
+    auto vf = fonts.loadFile("data/NotoSans-Variable.ttf", "sans-var");
+    if (!vf) { MESSAGE("variable font not found; skipping"); return; }
+    REQUIRE(!vf->descriptor().axes.empty());
+
+    FontSpec regular;
+    regular.family = {"sans-var"};
+    FontSpec bold = regular;
+    bold.weight = 700;
+    FontSpec narrow = regular;
+    narrow.variations["wdth"] = 62.5f;
+
+    auto fr = fonts.resolve(regular, U'H');
+    auto fb = fonts.resolve(bold, U'H');
+    auto fn = fonts.resolve(narrow, U'H');
+    REQUIRE(static_cast<bool>(fr));
+    REQUIRE(static_cast<bool>(fb));
+    REQUIRE(static_cast<bool>(fn));
+    CHECK((fr == vf));                    // 既定値ならそのまま
+    CHECK((fb != fr));
+    CHECK((fn != fr));
+    CHECK((fn != fb));
+    CHECK((fonts.resolve(bold, U'H') == fb));   // 同じ座標は同じインスタンス
+    CHECK(font::effectiveWeight(*fb) == 700);
+    CHECK(font::effectiveWeight(*fr) == 400);
+    // variations() は全軸の現在値（wdth は既定のまま、wght が 700）
+    bool sawWght = false;
+    for (const glyphware::VarCoord& c : fb->variations()) {
+        if (c.tag == font::makeTag("wght")) { sawWght = true; CHECK(c.value == doctest::Approx(700.0f)); }
+    }
+    CHECK(sawWght);
+
+    // 太いほど、細いほど送りが変わる。フェイクボールドは掛からない
+    TextStyle sr; sr.font = regular; sr.size = 20.0f;
+    TextStyle sb; sb.font = bold; sb.size = 20.0f;
+    TextStyle sn; sn.font = narrow; sn.size = 20.0f;
+    const inl::TextMetrics mr = inl::measureText(fonts, u"Hamburg", sr);
+    const inl::TextMetrics mb = inl::measureText(fonts, u"Hamburg", sb);
+    const inl::TextMetrics mn = inl::measureText(fonts, u"Hamburg", sn);
+    CHECK(mb.advance > mr.advance * 1.02f);
+    CHECK(mn.advance < mr.advance * 0.9f);
+    const inl::ShapedText shapedBold = inl::shapeText(u"H", sb, fonts, WritingMode::HorizontalTb);
+    REQUIRE(!shapedBold.glyphs.empty());
+    CHECK(shapedBold.glyphs[0].embolden == 0.0f);
+    CHECK((shapedBold.glyphs[0].face == fb));
+
+    // PDF: 2 つのインスタンスが別フォントとして、軸を固定して埋め込まれる
+    inl::ParagraphLayouter layouter(fonts);
+    inl::Paragraph para;
+    para.runs.push_back(inl::InlineRun{u"Regular ", sr});
+    para.runs.push_back(inl::InlineRun{u"Bold ", sb});
+    para.runs.push_back(inl::InlineRun{u"Narrow", sn});
+    const inl::ConstantLineShape shape(400.0f);
+    const inl::ParagraphFragment frag = layouter.layout(para, WritingMode::HorizontalTb, shape);
+    dl::DisplayList list;
+    list.page = Size{400, 100};
+    inl::emitParagraph(list, frag, WritingMode::HorizontalTb, Point{10, 50});
+    backend::PdfWriter pdf;
+    pdf.addPage(list);
+    const std::string path = "build/test_variable.pdf";
+    REQUIRE(pdf.save(path));
+    CHECK(pdf.warnings().empty());
+    std::ifstream in(path, std::ios::binary);
+    const std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    CHECK(bytes.find("wght700") != std::string::npos);
+    CHECK(bytes.find("wdth6") != std::string::npos);   // 62.5 → 四捨五入で 63
+    size_t fontFiles = 0;
+    for (size_t p = bytes.find("/FontFile"); p != std::string::npos; p = bytes.find("/FontFile", p + 1)) ++fontFiles;
+    CHECK(fontFiles == 3);
 }

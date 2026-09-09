@@ -233,7 +233,7 @@ ShapedText shapeText(const std::u16string& text, const std::vector<StyleRun>& ru
         // フェイクボールド／斜体（明示指定、またはフォントに該当スタイルが無いとき）
         const glyphware::FontDescriptor& desc = seg.face->descriptor();
         const bool fakeBold = style.fakeBold ||
-            (style.font.weight >= 600 && static_cast<int>(desc.weight) < 600);
+            (style.font.weight >= 600 && font::effectiveWeight(*seg.face) < 600);
         const bool fakeItalic = style.fakeItalic ||
             (style.font.italic && desc.slant == glyphware::Slant::Normal);
         const Pt embolden = fakeBold ? dl::fakeBoldWidth(size) : 0.0f;
@@ -255,7 +255,13 @@ ShapedText shapeText(const std::u16string& text, const std::vector<StyleRun>& ru
         if (!style.language.empty()) {
             hb_buffer_set_language(buffer, hb_language_from_string(style.language.c_str(), -1));
         }
-        hb_shape(hbFont, buffer, nullptr, 0);
+        std::vector<hb_feature_t> features;
+        for (const std::string& f : style.features) {
+            hb_feature_t ft;
+            if (hb_feature_from_string(f.c_str(), -1, &ft)) features.push_back(ft);
+        }
+        hb_shape(hbFont, buffer, features.empty() ? nullptr : features.data(),
+                 static_cast<unsigned int>(features.size()));
 
         unsigned int n = 0;
         const hb_glyph_info_t* info = hb_buffer_get_glyph_infos(buffer, &n);

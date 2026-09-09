@@ -481,8 +481,10 @@ std::vector<LineItem> buildLineItems(const ShapedText& shaped,
             continue;
         }
         const Pt em = emOf(ci);
-        float bodyEm = opts.punctuationSpacing ? text::getBodyWidth(c.charClass) : 0.0f;
-        if (!opts.punctuationSpacing && text::isJapanese(c.charClass)) bodyEm = 1.0f;
+        // palt 等でフォントが詰めている文字は送りをそのまま箱にする（JLReq の半角化と二重に詰めない）
+        const bool proportional = c.styleIndex < ctx.styles->size() && (*ctx.styles)[c.styleIndex].hasProportionalFeature();
+        float bodyEm = (opts.punctuationSpacing && !proportional) ? text::getBodyWidth(c.charClass) : 0.0f;
+        if (!opts.punctuationSpacing && !proportional && text::isJapanese(c.charClass)) bodyEm = 1.0f;
         Pt w = (bodyEm > 0.0f) ? bodyEm * em : c.advance;
         if (bodyEm > 0.0f && c.advance > 0.0f) w = std::min(w, c.advance);
         bodyWidths[ci] = w;
@@ -635,6 +637,7 @@ std::vector<LineItem> buildLineItems(const ShapedText& shaped,
     // 本体
     //--------------------------------------------------------------------------
     bool prevWasBox = false;
+    bool prevProportional = false;
     CharClass prevClass = CharClass::Unknown;
     Pt prevBoxWidth = 0.0f;
     Pt prevEm = baseEm;
@@ -646,6 +649,8 @@ std::vector<LineItem> buildLineItems(const ShapedText& shaped,
         const CharClass cls = cluster.charClass;
         const int compIdx = composite[ci];
         const Pt em = emOf(ci);
+        const bool proportional = compIdx == kNone && cluster.styleIndex < ctx.styles->size() &&
+                                  (*ctx.styles)[cluster.styleIndex].hasProportionalFeature();
 
         // 欧文間隔は Box ではなく Glue（そこが唯一の欧文の切れ目）。空白を保持する段落では固定幅の箱
         if (cls == CharClass::Space && compIdx == kNone && !ctx.preserveSpaces) {
@@ -674,6 +679,8 @@ std::vector<LineItem> buildLineItems(const ShapedText& shaped,
                 (text::isWestern(prevClass) && text::isJapanese(spacingClass));
             text::GlueSpec spec = text::getSpacing(prevClass, spacingClass);
             if (latinBoundary ? !opts.latinGap : !opts.punctuationSpacing) spec = text::GlueSpec{};
+            // palt 等で詰めた文字の前後の約物のアキはフォントに任せる（和欧間のアキは残す）
+            if (!latinBoundary && (proportional || prevProportional)) spec = text::GlueSpec{};
             const Pt glueEm = std::max(prevEm, em);
             const Pt natural = spec.natural * glueEm + ctx.letterSpacing * em + gapBefore[ci];
             Pt stretch = spec.stretch * glueEm;
@@ -716,6 +723,7 @@ std::vector<LineItem> buildLineItems(const ShapedText& shaped,
         items.push_back(std::move(box));
 
         prevWasBox = true;
+        prevProportional = proportional;
         prevClass = spacingClass;
         prevBoxWidth = boxWidth;
         prevEm = em;

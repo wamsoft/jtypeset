@@ -45,6 +45,7 @@ pages[0].save_svg("out_p1.svg")
 |---|---|
 | `FontSet` | フォントを開く（`load_file` / `load_bytes`）か宣言する（`declare(path, key, family, weight, italic, languages, ranges)`: 初回使用時に開く）。キー／family 名で引き、同じ family の複数 face から weight / italic の最近傍を選ぶ。文字が無ければ次の family へフォールバック。`set_language_fonts("zh", ["sans-sc"])` で言語ごとに先に試す family |
 | `TextStyle` / `ParagraphStyle` | 文字（フォント・サイズ・色・縁取り・影 `shadow`・層 `layers`・下線 `underline`・打消し線 `strikethrough`・ベースラインのずらし…）／段落（揃え・行送り・一字下げ・空白保持・タブ幅…） |
+| `FontSpec` | family 列・weight・italic・`variations`（バリアブルフォントの軸 `{'wght': 700}`）。`TextStyle.features` は OpenType feature（`['palt']`） |
 | `TextShadow` / `TextLayer` / `TextDecoration` | 影（色・ずらし・ぼかし）／外観の 1 層（塗り・縁取り・ずらし・ぼかし。`layers` に下から上の順）／下線・打消し線（色・太さ・位置の補正） |
 | `Paragraph` | run の列＋注記。`add_run(text, style, literal=False)`、`add_image`、`add_object`（外部オブジェクト）、`add_placeholder(size, style, id)`（描かない空箱。位置は組んだあと取る）、`add_footnote`、`annotate` |
 | `ParagraphLayout` | `layout_paragraph()` の結果。行の列（`lines` / 添字アクセス）に加え、`char_boxes(line, origin)`（文字ごとの位置・スタイル・グリフ）、`rects_for(start, end, origin)`（文字範囲 → 矩形）、`placeholder_rects(origin)`、`hit_test(point, origin)`、`caret_rect(index, origin)`、`save_png(path, size, origin, dpi, max_chars)`（段階表示は `max_chars`） |

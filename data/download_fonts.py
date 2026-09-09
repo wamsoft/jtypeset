@@ -59,6 +59,23 @@ FONTS = [
         "https://github.com/notofonts/noto-cjk/releases/download/Serif2.003/07_NotoSerifCJKjp.zip",
         "OTF/Japanese/NotoSerifCJKjp-Bold.otf",
     ),
+    # 双方向テキスト（アラビア文字・ヘブライ文字）のテスト用
+    (
+        "NotoSansArabic-Regular.ttf",
+        "https://github.com/notofonts/arabic/releases/download/NotoSansArabic-v2.013/NotoSansArabic-v2.013.zip",
+        "NotoSansArabic/unhinted/ttf/NotoSansArabic-Regular.ttf",
+    ),
+    (
+        "NotoSansHebrew-Regular.ttf",
+        "https://github.com/notofonts/hebrew/releases/download/NotoSansHebrew-v3.001/NotoSansHebrew-v3.001.zip",
+        "NotoSansHebrew/unhinted/ttf/NotoSansHebrew-Regular.ttf",
+    ),
+    # バリアブルフォント（wdth / wght 軸）のテスト用。NotoSans-Regular と同じ zip
+    (
+        "NotoSans-Variable.ttf",
+        "https://github.com/notofonts/latin-greek-cyrillic/releases/download/NotoSans-v2.015/NotoSans-v2.015.zip",
+        "NotoSans/unhinted/variable-ttf/NotoSans[wdth,wght].ttf",
+    ),
     # カラー絵文字（CBDT ビットマップ）。絵文字のフォールバック用
     (
         "NotoColorEmoji.ttf",
