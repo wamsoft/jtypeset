@@ -103,7 +103,7 @@ jobs:
       - name: Samples
         shell: bash
         run: |
-          for s in sample_inline sample_script sample_novel sample_tech sample_report sample_objects; do
+          for s in sample_dl sample_inline sample_script sample_novel sample_tech sample_report sample_objects sample_text_style sample_game sample_intl; do
             exe=$(find build/${{ matrix.preset }} -name "$s" -o -name "$s.exe" | head -1)
             [ -n "$exe" ] && "$exe" > /dev/null || true
           done
