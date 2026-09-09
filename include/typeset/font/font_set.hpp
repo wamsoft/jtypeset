@@ -3,6 +3,7 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -17,14 +18,34 @@ namespace typeset { struct FontSpec; }
 /**
  * font — フォント層（glyphware の薄い包み）
  *
- *  - face を開いてキーで引く
- *  - FontSpec（family のフォールバック列）と文字から face を解決する
+ *  - face を開く（loadFile / loadMemory）か、メタデータだけ宣言して初回使用時に開く（declare）
+ *  - 同じ family に複数の face（ウェイト・斜体）を登録でき、FontSpec の weight / italic に最も近い face を選ぶ
+ *    （CSS Fonts の font-matching と同じ規則。無ければ通常の face に落ち、組版層がフェイクボールド／斜体にする）
+ *  - FontSpec（family のフォールバック列）と文字から face を解決する。言語 → family の置換表
+ *    （setLanguageFonts）と宣言の languages により、言語の付いた文字は先にその言語のフォントを試す
  *  - シェイピング用の hb_font_t を face ごとに 1 つ持つ。glyphware の Face::hb() は
  *    hb-ft（FT のピクセルサイズに縛られる）なので使わず、フォントのバイト列から
  *    OT funcs の hb_font を作り、スケールを unitsPerEm にして**フォントユニットで**
  *    位置を受け取る。vmtx / VORG による縦メトリクスもこの経路で効く
  */
 namespace typeset::font {
+
+/**
+ * フォントの宣言（開かずに登録するためのメタデータ）
+ *
+ * family / weight / italic / languages / ranges は開かなくても分かる情報。開いたあとは name テーブルの family 名も
+ * 引けるようになる。weight = 0 と italic = nullopt は「開いたときにフォントから取る」（開くまでは 400 / 非斜体）
+ */
+struct FontDeclaration {
+    std::string key;                        ///< 一意なキー（TextStyle の family に書く名前）
+    std::string path;                       ///< ファイル（初回使用時に開く）
+    int faceIndex = 0;
+    std::vector<std::string> family;        ///< 別名（同じ family の別ウェイトは同じ名前を書く）
+    int weight = 0;                         ///< 100〜900。0 でフォントから
+    std::optional<bool> italic;             ///< nullopt でフォントから
+    std::vector<std::string> languages;     ///< BCP47。この言語のテキストで先に試される
+    std::vector<glyphware::CodepointRange> ranges;  ///< カバレッジ（空なら開いて cmap を見る）
+};
 
 class FontSet {
 public:
@@ -35,7 +56,7 @@ public:
     FontSet& operator=(const FontSet&) = delete;
 
     /**
-     * ファイルから開く。key を省略するとパスがキーになる
+     * ファイルから開く。key を省略するとパスがキーになる。family / weight / italic は name・OS/2 から
      * @return 失敗時 nullptr
      */
     std::shared_ptr<glyphware::Face> loadFile(const std::string& path,
@@ -47,28 +68,75 @@ public:
                                                 const void* data, size_t size,
                                                 int faceIndex = 0);
 
-    /// 登録済み face（キー、または family 名で。無ければ nullptr）
-    std::shared_ptr<glyphware::Face> find(const std::string& keyOrFamily) const;
+    /**
+     * 開かずに宣言する。同じキーがあれば置き換える。ファイルは初回使用時に開く（無ければそのとき失敗し、
+     * 以後は無いものとして扱う）
+     * @return キーが空なら false
+     */
+    bool declare(FontDeclaration decl);
+
+    /// 登録済みか（開いているかどうかは問わない）
+    bool has(const std::string& key) const;
+    /// 開いているか（declare しただけなら false。開くのに失敗したものも false）
+    bool isLoaded(const std::string& key) const;
+    /// 登録したキー（登録順）
+    std::vector<std::string> keys() const;
+
+    /// 登録済み face（キー、または family 名で。通常ウェイト・非斜体を優先。無ければ nullptr）。必要なら開く
+    std::shared_ptr<glyphware::Face> find(const std::string& keyOrFamily);
+
+    /// キー／family 名と weight / italic に最も近い face。必要なら開く
+    std::shared_ptr<glyphware::Face> select(const std::string& keyOrFamily, int weight, bool italic);
 
     /**
-     * FontSpec の family 列を順に見て、cp を持つ最初の face を返す。
-     * どれも持たなければ最初に見つかった face（.notdef が出る）。
-     * 1 つも解決できなければ nullptr
+     * FontSpec の family 列（language の置換表・宣言の languages が先）を順に見て、cp を持つ最初の face を返す。
+     * family ごとに weight / italic の最近傍を選ぶ。
+     * どれも持たなければ最初に見つかった face（.notdef が出る）。1 つも解決できなければ nullptr
      */
-    std::shared_ptr<glyphware::Face> resolve(const FontSpec& spec, char32_t cp) const;
+    std::shared_ptr<glyphware::Face> resolve(const FontSpec& spec, char32_t cp,
+                                             const std::string& language = std::string());
 
-    /// FontSpec の第一候補（行のメトリクス基準に使う）
-    std::shared_ptr<glyphware::Face> primary(const FontSpec& spec) const;
+    /// FontSpec の第一候補（行のメトリクス基準に使う。言語の置換は見ない）
+    std::shared_ptr<glyphware::Face> primary(const FontSpec& spec);
+
+    /**
+     * 言語 → 先に試す family の列。"zh-Hans" のように地域・用字系まで書いた言語は、その完全一致が無ければ
+     * 主言語（"zh"）の表を使う。families が空なら削除
+     */
+    void setLanguageFonts(const std::string& language, std::vector<std::string> families);
+    /// language に対応する family 列（置換表＋宣言の languages にその言語を持つキー）。無ければ空
+    std::vector<std::string> languageFonts(const std::string& language) const;
 
     /**
      * シェイピング用 hb_font（フォントユニットスケール）。FontSet が所有する
      */
     hb_font_t* hbFont(const glyphware::Face& face);
 
-    size_t size() const { return faces_.size(); }
+    /// 登録した数（宣言だけのものも含む）
+    size_t size() const { return entries_.size(); }
 
 private:
-    std::map<std::string, std::shared_ptr<glyphware::Face>> faces_;
+    struct Entry {
+        FontDeclaration decl;
+        std::shared_ptr<glyphware::Face> face;
+        bool failed = false;                    ///< 開こうとして失敗した
+        std::vector<std::string> names;         ///< 開いたあとの name テーブル由来の名前
+        int weight = 400;                       ///< 実効（宣言、または開いた face の値）
+        bool italic = false;
+        bool matches(const std::string& name) const;
+        bool languageMatches(const std::string& language) const;
+    };
+
+    Entry* entryFor(const std::string& key);
+    void adopt(Entry& e, std::shared_ptr<glyphware::Face> face);
+    bool ensureLoaded(Entry& e);
+    bool covers(Entry& e, char32_t cp);
+    /// name に合う登録から weight / italic の最近傍（開かない）。無ければ nullptr
+    Entry* best(const std::string& name, int weight, bool italic);
+    std::shared_ptr<glyphware::Face> faceOf(Entry* e);
+
+    std::vector<std::unique_ptr<Entry>> entries_;
+    std::map<std::string, std::vector<std::string>> languageFonts_;
     std::map<const glyphware::Face*, hb_font_t*> hbFonts_;
 };
 

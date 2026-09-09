@@ -653,3 +653,151 @@ TEST_CASE("text layers: shadow and outline layers are emitted bottom-up, aligned
         CHECK(runs[1].glyphs.size() == 8);
     }
 }
+
+TEST_CASE("font set: nearest weight / italic face is selected per family, falling back to fake bold") {
+    font::FontSet fonts;
+    auto regular = fonts.loadFile("data/NotoSerif-Regular.ttf", "serif");
+    auto bold = fonts.loadFile("data/NotoSerif-Bold.ttf", "serif-bold");
+    if (!regular || !bold) { MESSAGE("fonts not found; skipping"); return; }
+    // 別キーでも name テーブルの family 名（Noto Serif）で同じ family として引ける
+    CHECK((fonts.find("Noto Serif") == regular));
+    CHECK((fonts.select("Noto Serif", 700, false) == bold));
+    CHECK((fonts.select("Noto Serif", 600, false) == bold));
+    CHECK((fonts.select("Noto Serif", 500, false) == regular));   // 400〜500 は 500 まで上を見てから下
+    CHECK((fonts.select("Noto Serif", 300, false) == regular));
+    CHECK((fonts.select("Noto Serif", 900, false) == bold));
+    // 斜体が無ければ通常の face（組版層でフェイク斜体）
+    CHECK((fonts.select("Noto Serif", 400, true) == regular));
+    auto italic = fonts.loadFile("data/NotoSerif-Italic.ttf", "serif-italic");
+    if (italic) {
+        CHECK((fonts.select("Noto Serif", 400, true) == italic));
+        CHECK((fonts.select("Noto Serif", 700, true) == italic));   // 斜体の一致がウェイトより優先
+        CHECK((fonts.select("Noto Serif", 400, false) == regular));
+    }
+
+    // FontSpec の weight で resolve / primary が太字 face を返し、シェイプ結果はフェイクボールド無し
+    FontSpec spec;
+    spec.family = {"Noto Serif"};
+    spec.weight = 700;
+    CHECK((fonts.resolve(spec, U'A') == bold));
+    CHECK((fonts.primary(spec) == bold));
+    TextStyle st;
+    st.font = spec;
+    st.size = 10.0f;
+    const inl::ShapedText shaped = inl::shapeText(u"AB", st, fonts, WritingMode::HorizontalTb);
+    REQUIRE(!shaped.glyphs.empty());
+    CHECK((shaped.glyphs[0].face == bold));
+    CHECK(shaped.glyphs[0].embolden == 0.0f);
+
+    // 太字 face を持たない family は今までどおりフェイクボールド
+    font::FontSet only;
+    if (only.loadFile("data/NotoSerif-Regular.ttf", "serif")) {
+        const inl::ShapedText fake = inl::shapeText(u"AB", st, only, WritingMode::HorizontalTb);
+        REQUIRE(!fake.glyphs.empty());
+        CHECK(fake.glyphs[0].embolden > 0.0f);
+    }
+}
+
+TEST_CASE("font set: declared fonts open on first use and unknown files fail quietly") {
+    font::FontSet fonts;
+    font::FontDeclaration jp;
+    jp.key = "serif-ja";
+    jp.path = "data/NotoSerifJP-Regular.otf";
+    jp.family = {"serif"};
+    REQUIRE(fonts.declare(jp));
+    font::FontDeclaration latin;
+    latin.key = "serif-latin";
+    latin.path = "data/NotoSerif-Regular.ttf";
+    latin.family = {"serif"};
+    latin.ranges = {{0x0000, 0x024F}};      // カバレッジを宣言: 和字では開かれない
+    REQUIRE(fonts.declare(latin));
+    font::FontDeclaration missing;
+    missing.key = "nope";
+    missing.path = "data/does-not-exist.ttf";
+    missing.family = {"serif"};
+    missing.weight = 700;
+    REQUIRE(fonts.declare(missing));
+    CHECK(fonts.size() == 3);
+    CHECK(fonts.has("serif-ja"));
+    CHECK(!fonts.isLoaded("serif-ja"));
+    CHECK(!fonts.isLoaded("serif-latin"));
+
+    FontSpec spec;
+    spec.family = {"serif"};
+    auto face = fonts.resolve(spec, U'猫');
+    if (!face) { MESSAGE("fonts not found; skipping"); return; }
+    CHECK(fonts.isLoaded("serif-ja"));
+    CHECK(!fonts.isLoaded("serif-latin"));      // ranges で外れたので開いていない
+    CHECK(face->descriptor().key == "serif-ja");
+
+    // 開けない太字宣言は無視され、通常ウェイトに落ちる
+    spec.weight = 700;
+    auto b = fonts.resolve(spec, U'猫');
+    REQUIRE(static_cast<bool>(b));
+    CHECK(b->descriptor().key == "serif-ja");
+    CHECK(!fonts.isLoaded("nope"));
+
+    // 同点（同じ weight / italic）なら宣言順で先の serif-ja が 'A' も持つので返り、serif-latin はまだ開かない
+    spec.weight = 400;
+    auto l = fonts.resolve(spec, U'A');
+    REQUIRE(static_cast<bool>(l));
+    CHECK(l->descriptor().key == "serif-ja");
+    CHECK(!fonts.isLoaded("serif-latin"));
+    // キーで直接引けば開く
+    spec.family = {"serif-latin"};
+    auto l2 = fonts.resolve(spec, U'A');
+    REQUIRE(static_cast<bool>(l2));
+    CHECK(fonts.isLoaded("serif-latin"));
+    CHECK(l2->descriptor().key == "serif-latin");
+    CHECK(fonts.keys() == std::vector<std::string>{"serif-ja", "serif-latin", "nope"});
+}
+
+TEST_CASE("font set: language-linked fonts are tried before the style's families") {
+    font::FontSet fonts;
+    auto serif = fonts.loadFile("data/NotoSerifJP-Regular.otf", "serif-ja");
+    auto sans = fonts.loadFile("data/NotoSansJP-Regular.otf", "sans-ja");
+    if (!serif || !sans) { MESSAGE("fonts not found; skipping"); return; }
+    fonts.setLanguageFonts("zh", {"sans-ja"});
+
+    FontSpec spec;
+    spec.family = {"serif-ja"};
+    CHECK((fonts.resolve(spec, U'中', "ja") == serif));
+    CHECK((fonts.resolve(spec, U'中', "zh") == sans));
+    CHECK((fonts.resolve(spec, U'中', "zh-Hans") == sans));   // 主言語で引く
+    CHECK((fonts.resolve(spec, U'中', "") == serif));
+    CHECK((fonts.primary(spec) == serif));                     // 行のメトリクス基準は変えない
+    // 言語のフォントが文字を持たなければ本来の family へ
+    fonts.setLanguageFonts("ko", {"missing-family"});
+    CHECK((fonts.resolve(spec, U'中', "ko") == serif));
+    fonts.setLanguageFonts("zh", {});
+    CHECK((fonts.resolve(spec, U'中', "zh") == serif));
+
+    // 宣言の languages でも同じ（開くのは使うとき）
+    font::FontDeclaration d;
+    d.key = "sans-zh";
+    d.path = "data/NotoSansJP-Regular.otf";
+    d.languages = {"zh"};
+    REQUIRE(fonts.declare(d));
+    CHECK(!fonts.isLoaded("sans-zh"));
+    auto zh = fonts.resolve(spec, U'中', "zh-Hant");
+    REQUIRE(static_cast<bool>(zh));
+    CHECK(zh->descriptor().key == "sans-zh");
+    CHECK((fonts.resolve(spec, U'中', "ja") == serif));
+
+    // TextStyle::language が itemize に効く: 同じ段落の中で中国語の run だけ別 face
+    TextStyle ja;
+    ja.font = spec;
+    ja.size = 10.0f;
+    TextStyle zhStyle = ja;
+    zhStyle.language = "zh-Hans";
+    inl::Paragraph para;
+    para.runs.push_back(inl::InlineRun{u"日本語", ja});
+    para.runs.push_back(inl::InlineRun{u"中文", zhStyle});
+    inl::ParagraphLayouter layouter(fonts);
+    const inl::ConstantLineShape shape(200.0f);
+    const inl::ParagraphFragment frag = layouter.layout(para, WritingMode::HorizontalTb, shape);
+    REQUIRE(frag.lines.size() == 1);
+    REQUIRE(frag.lines[0].glyphs.size() == 5);
+    CHECK((frag.lines[0].glyphs[0].face == serif));
+    CHECK(frag.lines[0].glyphs[3].face->descriptor().key == "sans-zh");
+}

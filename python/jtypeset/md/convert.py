@@ -74,7 +74,8 @@ class Options:
     columns: int = 1
     column_gap: float = 0.0           # pt（0 = 既定）
     margin: Any = None                # mm。数値、または {top, bottom, inner, outer}
-    fonts: List[Any] = field(default_factory=list)   # ファイルパス、または {path, key, index}
+    fonts: List[Any] = field(default_factory=list)   # ファイルパス、または {path, key, index, family, weight, italic, languages, lazy}
+    font_languages: Dict[str, Any] = field(default_factory=dict)   # 言語 → 先に試す family（キー）の列
     font_body: List[str] = field(default_factory=lambda: ["serif"])
     font_heading: List[str] = field(default_factory=lambda: ["sans"])
     font_mono: List[str] = field(default_factory=lambda: ["sans"])
@@ -198,16 +199,35 @@ class Converter:
         loaded: Dict[str, bool] = {}
         for f in self.opts.fonts:
             if isinstance(f, str):
-                path, key, index = f, "", 0
-            else:
-                path, key, index = f.get("path", ""), f.get("key", ""), int(f.get("index", 0))
+                f = {"path": f}
+            path, key, index = f.get("path", ""), f.get("key", ""), int(f.get("index", 0))
             full = path if os.path.isabs(path) else os.path.join(self.base_dir, path)
             if not os.path.exists(full):
                 full = path
-            if not self.fonts.load_file(full, key, index):
+            family = f.get("family", [])
+            if isinstance(family, str):
+                family = [family]
+            languages = f.get("languages", [])
+            if isinstance(languages, str):
+                languages = [languages]
+            italic = f.get("italic")
+            declared = any(k in f for k in ("family", "weight", "italic", "languages")) or f.get("lazy", False)
+            if declared:
+                # メタデータ付きは宣言だけにして初回使用時に開く（別ウェイトや言語用フォントを並べても軽い）
+                if not os.path.exists(full):
+                    self.warnings.append(f"font not found: {path}")
+                    continue
+                self.fonts.declare(full, key, family, int(f.get("weight", 0)),
+                                   None if italic is None else bool(italic), languages, [], index)
+                loaded[key or path] = True
+            elif not self.fonts.load_file(full, key, index):
                 self.warnings.append(f"font not loaded: {path}")
             else:
                 loaded[key or path] = True
+        for lang, fams in (self.opts.font_languages or {}).items():
+            if isinstance(fams, str):
+                fams = [fams]
+            self.fonts.set_language_fonts(str(lang), [str(x) for x in fams])
         # 既定のキー serif / sans が無ければ探す。絵文字フォントは見つかれば末尾のフォールバックに足す
         for key in ("serif", "sans", "emoji"):
             if key in loaded:
@@ -588,7 +608,6 @@ class Converter:
                 c = int(info["color"], 16)
                 st.fill = ts.Color((c >> 16) & 255, (c >> 8) & 255, c & 255, 255)
             if info.get("bold"):
-                st.fake_bold = True
                 st.font.weight = 700
             if info.get("italic"):
                 st.fake_italic = True
@@ -768,10 +787,9 @@ class Converter:
         def cur_style() -> ts.TextStyle:
             st = self.mono.copy() if state["code"] else base.copy()
             if state["bold"]:
-                st.font.weight = 700
-                st.fake_bold = True
+                st.font.weight = 700       # 太字 face があればそれを、無ければフェイクボールド
             if state["italic"]:
-                st.fake_italic = True
+                st.font.italic = True      # 斜体 face があればそれを、無ければフェイク斜体（欧文だけ傾く）
             if state["underline"]:
                 st.underline = ts.TextDecoration()
             if state["strike"]:

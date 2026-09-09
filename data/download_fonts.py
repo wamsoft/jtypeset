@@ -30,6 +30,17 @@ FONTS = [
         "https://github.com/notofonts/latin-greek-cyrillic/releases/download/NotoSerif-v2.015/NotoSerif-v2.015.zip",
         "NotoSerif/unhinted/ttf/NotoSerif-Regular.ttf",
     ),
+    # 欧文の太字・斜体（ウェイト／斜体の face 選択のテスト用。Regular と同じ zip）
+    (
+        "NotoSerif-Bold.ttf",
+        "https://github.com/notofonts/latin-greek-cyrillic/releases/download/NotoSerif-v2.015/NotoSerif-v2.015.zip",
+        "NotoSerif/unhinted/ttf/NotoSerif-Bold.ttf",
+    ),
+    (
+        "NotoSerif-Italic.ttf",
+        "https://github.com/notofonts/latin-greek-cyrillic/releases/download/NotoSerif-v2.015/NotoSerif-v2.015.zip",
+        "NotoSerif/unhinted/ttf/NotoSerif-Italic.ttf",
+    ),
     # 日本語（固定ウェイト）
     (
         "NotoSansJP-Regular.otf",
@@ -41,6 +52,12 @@ FONTS = [
         "NotoSerifJP-Regular.otf",
         "https://github.com/notofonts/noto-cjk/releases/download/Serif2.003/07_NotoSerifCJKjp.zip",
         "OTF/Japanese/NotoSerifCJKjp-Regular.otf",
+    ),
+    # 日本語 Serif の太字（ウェイト選択のテスト用。Regular と同じ zip）
+    (
+        "NotoSerifJP-Bold.otf",
+        "https://github.com/notofonts/noto-cjk/releases/download/Serif2.003/07_NotoSerifCJKjp.zip",
+        "OTF/Japanese/NotoSerifCJKjp-Bold.otf",
     ),
     # カラー絵文字（CBDT ビットマップ）。絵文字のフォールバック用
     (
@@ -57,12 +74,19 @@ FONTS = [
 ]
 
 
+_DOWNLOAD_CACHE: dict = {}
+
+
 def download_url(url: str) -> bytes:
-    """URL からデータをダウンロードする"""
+    """URL からデータをダウンロードする（同じ zip は 1 回だけ）"""
+    if url in _DOWNLOAD_CACHE:
+        return _DOWNLOAD_CACHE[url]
     print(f"  Downloading: {url}")
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=120) as resp:
-        return resp.read()
+        data = resp.read()
+    _DOWNLOAD_CACHE[url] = data
+    return data
 
 
 def extract_from_zip(data: bytes, inner_path: str) -> bytes:

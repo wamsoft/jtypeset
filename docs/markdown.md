@@ -88,6 +88,9 @@ fonts:                    # フォントファイル（相対パスは Markdown 
   - fonts/NotoSerifJP-Regular.otf
   - {path: fonts/NotoSansJP-Regular.otf, key: sans}
   - {path: C:/Windows/Fonts/YuGothM.ttc, key: yugo, index: 0}
+  - {path: fonts/NotoSerifJP-Bold.otf, key: serif-b, family: [serif], weight: 700}   # 同じ family の太字（**強調** で使われる）
+  - {path: fonts/NotoSansSC-Regular.otf, key: sans-sc, languages: [zh]}             # 中国語のテキストで先に試す
+font-languages: {zh: [sans-sc]}   # 言語 → 先に試す family（宣言の languages と同じ意味）
 font-body: [serif]        # 本文の family（キー）。最初に無い字は次へフォールバック
 font-heading: [sans]
 font-mono: [sans]

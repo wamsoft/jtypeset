@@ -43,7 +43,7 @@ pages[0].save_svg("out_p1.svg")
 
 | 型 | 役割 |
 |---|---|
-| `FontSet` | フォントを開いてキー／family 名で引く。文字が無ければ次の family へフォールバック |
+| `FontSet` | フォントを開く（`load_file` / `load_bytes`）か宣言する（`declare(path, key, family, weight, italic, languages, ranges)`: 初回使用時に開く）。キー／family 名で引き、同じ family の複数 face から weight / italic の最近傍を選ぶ。文字が無ければ次の family へフォールバック。`set_language_fonts("zh", ["sans-sc"])` で言語ごとに先に試す family |
 | `TextStyle` / `ParagraphStyle` | 文字（フォント・サイズ・色・縁取り・影 `shadow`・層 `layers`・下線 `underline`・打消し線 `strikethrough`・ベースラインのずらし…）／段落（揃え・行送り・一字下げ・空白保持・タブ幅…） |
 | `TextShadow` / `TextLayer` / `TextDecoration` | 影（色・ずらし・ぼかし）／外観の 1 層（塗り・縁取り・ずらし・ぼかし。`layers` に下から上の順）／下線・打消し線（色・太さ・位置の補正） |
 | `Paragraph` | run の列＋注記。`add_run(text, style, literal=False)`、`add_image`、`add_object`（外部オブジェクト）、`add_footnote`、`annotate` |
@@ -129,7 +129,8 @@ pages, warnings = convert_file("report.md", "report.pdf", Options(), png_dpi=0,
 | `writing` | horizontal / vertical | horizontal |
 | `columns` `column-gap` | 段数と段間（pt） | 1 |
 | `margin` | mm。数値または `{top, bottom, inner, outer}` | 20（A5 等は 16） |
-| `fonts` | フォントファイルの列（`{path, key, index}` も可）。無ければ `data/` の Noto → OS のフォント | |
+| `fonts` | フォントファイルの列（`{path, key, index, family, weight, italic, languages}` も可。family 等を書いたものは初回使用時に開く）。無ければ `data/` の Noto → OS のフォント | |
+| `font-languages` | 言語 → 先に試す family の列（`{zh: [sans-sc]}`） | |
 | `font-body` `font-heading` `font-mono` | 本文・見出し・コードの family（FontSet のキー） | serif / sans / sans |
 | `size` `line-height` `indent` `justify` | 本文サイズ・行送り・一字下げ・両端揃え | 10.5 / 1.75 / true / true |
 | `toc` `toc-depth` `numbering` `heading-page-break` | 目次・見出しの採番・改ページする見出しレベル | false / 2 / true / 0 |

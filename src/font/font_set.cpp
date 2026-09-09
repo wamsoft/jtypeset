@@ -4,6 +4,8 @@
 
 #include "typeset/font/font_set.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -16,25 +18,114 @@
 
 namespace typeset::font {
 
+namespace {
+
+std::string lowerAscii(std::string s) {
+    for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+/// BCP47 の主言語（"zh-Hans" → "zh"）
+std::string primaryLanguage(const std::string& language) {
+    const size_t p = language.find_first_of("-_");
+    return lowerAscii(p == std::string::npos ? language : language.substr(0, p));
+}
+
+bool sameLanguage(const std::string& a, const std::string& b) {
+    return lowerAscii(a) == lowerAscii(b);
+}
+
+/**
+ * CSS Fonts 4 の font-weight のマッチング順。小さいほど望ましい。
+ *  - 400〜500 が望みなら、まず 500 までの上、次に下、最後に 500 より上
+ *  - 400 未満なら下から、500 より上なら上から
+ */
+int weightDistance(int desired, int actual) {
+    if (actual == desired) return 0;
+    if (desired >= 400 && desired <= 500) {
+        if (actual > desired && actual <= 500) return actual - desired;              // 1〜100
+        if (actual < desired) return 200 + (desired - actual);                       // 200〜
+        return 1000 + (actual - desired);                                            // 500 より上
+    }
+    if (desired < 400) {
+        if (actual < desired) return desired - actual;
+        return 1000 + (actual - desired);
+    }
+    if (actual > desired) return actual - desired;
+    return 1000 + (desired - actual);
+}
+
+std::string readFile(const std::string& path) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file) return {};
+    return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+}
+
+} // namespace
+
+//------------------------------------------------------------------------------
+
+bool FontSet::Entry::matches(const std::string& name) const {
+    if (decl.key == name) return true;
+    for (const std::string& f : decl.family) if (f == name) return true;
+    for (const std::string& f : names) if (f == name) return true;
+    return false;
+}
+
+bool FontSet::Entry::languageMatches(const std::string& language) const {
+    if (language.empty()) return false;
+    const std::string prim = primaryLanguage(language);
+    for (const std::string& l : decl.languages) {
+        if (sameLanguage(l, language)) return true;
+        if (primaryLanguage(l) == prim && l.find_first_of("-_") == std::string::npos) return true;
+    }
+    return false;
+}
+
 FontSet::FontSet() = default;
 
 FontSet::~FontSet() {
     for (auto& kv : hbFonts_) hb_font_destroy(kv.second);
 }
 
+FontSet::Entry* FontSet::entryFor(const std::string& key) {
+    for (auto& e : entries_) if (e->decl.key == key) return e.get();
+    return nullptr;
+}
+
+void FontSet::adopt(Entry& e, std::shared_ptr<glyphware::Face> face) {
+    e.face = std::move(face);
+    e.failed = false;
+    const glyphware::FontDescriptor& d = e.face->descriptor();
+    e.names.clear();
+    for (const std::string* n : {&d.family, &d.typographicFamily, &d.fullName, &d.postScriptName}) {
+        if (!n->empty()) e.names.push_back(*n);
+    }
+    if (e.decl.weight > 0) e.weight = e.decl.weight;
+    else e.weight = static_cast<int>(d.weight) > 0 ? static_cast<int>(d.weight) : (d.bold ? 700 : 400);
+    e.italic = e.decl.italic.has_value() ? *e.decl.italic : (d.slant != glyphware::Slant::Normal);
+}
+
 std::shared_ptr<glyphware::Face> FontSet::loadFile(const std::string& path,
                                                    const std::string& key,
                                                    int faceIndex) {
-    std::ifstream file(path, std::ios::binary);
-    if (!file) return nullptr;
-    std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    std::string bytes = readFile(path);
     if (bytes.empty()) return nullptr;
-
     const std::string k = key.empty() ? path : key;
     auto blob = std::make_shared<glyphware::OwnedFontBlob>(std::move(bytes));
     auto face = glyphware::Face::open(blob, k, faceIndex);
     if (!face) return nullptr;
-    faces_[k] = face;
+
+    Entry* e = entryFor(k);
+    if (!e) {
+        entries_.push_back(std::make_unique<Entry>());
+        e = entries_.back().get();
+    }
+    e->decl = FontDeclaration{};
+    e->decl.key = k;
+    e->decl.path = path;
+    e->decl.faceIndex = faceIndex;
+    adopt(*e, face);
     return face;
 }
 
@@ -45,41 +136,179 @@ std::shared_ptr<glyphware::Face> FontSet::loadMemory(const std::string& key,
     auto blob = std::make_shared<glyphware::OwnedFontBlob>(data, size);
     auto face = glyphware::Face::open(blob, key, faceIndex);
     if (!face) return nullptr;
-    faces_[key] = face;
+
+    Entry* e = entryFor(key);
+    if (!e) {
+        entries_.push_back(std::make_unique<Entry>());
+        e = entries_.back().get();
+    }
+    e->decl = FontDeclaration{};
+    e->decl.key = key;
+    e->decl.faceIndex = faceIndex;
+    adopt(*e, face);
     return face;
 }
 
-std::shared_ptr<glyphware::Face> FontSet::find(const std::string& keyOrFamily) const {
-    auto it = faces_.find(keyOrFamily);
-    if (it != faces_.end()) return it->second;
-    for (const auto& kv : faces_) {
-        const glyphware::FontDescriptor& d = kv.second->descriptor();
-        if (d.family == keyOrFamily || d.typographicFamily == keyOrFamily ||
-            d.fullName == keyOrFamily || d.postScriptName == keyOrFamily) {
-            return kv.second;
+bool FontSet::declare(FontDeclaration decl) {
+    if (decl.key.empty()) return false;
+    Entry* e = entryFor(decl.key);
+    if (!e) {
+        entries_.push_back(std::make_unique<Entry>());
+        e = entries_.back().get();
+    }
+    e->face = nullptr;
+    e->failed = false;
+    e->names.clear();
+    e->weight = decl.weight > 0 ? decl.weight : 400;
+    e->italic = decl.italic.value_or(false);
+    e->decl = std::move(decl);
+    return true;
+}
+
+bool FontSet::has(const std::string& key) const {
+    for (const auto& e : entries_) if (e->decl.key == key) return true;
+    return false;
+}
+
+bool FontSet::isLoaded(const std::string& key) const {
+    for (const auto& e : entries_) if (e->decl.key == key) return static_cast<bool>(e->face);
+    return false;
+}
+
+std::vector<std::string> FontSet::keys() const {
+    std::vector<std::string> out;
+    for (const auto& e : entries_) out.push_back(e->decl.key);
+    return out;
+}
+
+bool FontSet::ensureLoaded(Entry& e) {
+    if (e.face) return true;
+    if (e.failed) return false;
+    std::string bytes = e.decl.path.empty() ? std::string() : readFile(e.decl.path);
+    if (bytes.empty()) {
+        e.failed = true;
+        return false;
+    }
+    auto blob = std::make_shared<glyphware::OwnedFontBlob>(std::move(bytes));
+    auto face = glyphware::Face::open(blob, e.decl.key, e.decl.faceIndex);
+    if (!face) {
+        e.failed = true;
+        return false;
+    }
+    adopt(e, face);
+    return true;
+}
+
+bool FontSet::covers(Entry& e, char32_t cp) {
+    if (!e.decl.ranges.empty()) {
+        for (const glyphware::CodepointRange& r : e.decl.ranges) {
+            if (cp >= r.lo && cp <= r.hi) return ensureLoaded(e);
         }
+        return false;
+    }
+    if (!ensureLoaded(e)) return false;
+    return e.face->covers(cp);
+}
+
+FontSet::Entry* FontSet::best(const std::string& name, int weight, bool italic) {
+    Entry* bestEntry = nullptr;
+    int bestScore = 0;
+    for (auto& up : entries_) {
+        Entry& e = *up;
+        if (e.failed || !e.matches(name)) continue;
+        // 斜体の一致を最優先し、次にウェイトの近さ
+        const int score = (e.italic == italic ? 0 : 100000) + weightDistance(weight, e.weight);
+        if (!bestEntry || score < bestScore) {
+            bestEntry = &e;
+            bestScore = score;
+        }
+    }
+    return bestEntry;
+}
+
+std::shared_ptr<glyphware::Face> FontSet::faceOf(Entry* e) {
+    if (!e) return nullptr;
+    return ensureLoaded(*e) ? e->face : nullptr;
+}
+
+std::shared_ptr<glyphware::Face> FontSet::find(const std::string& keyOrFamily) {
+    return select(keyOrFamily, 400, false);
+}
+
+std::shared_ptr<glyphware::Face> FontSet::select(const std::string& keyOrFamily, int weight, bool italic) {
+    // 開けないものが混ざっていても、次に近いものへ落ちる
+    for (;;) {
+        Entry* e = best(keyOrFamily, weight, italic);
+        if (!e) return nullptr;
+        if (auto face = faceOf(e)) return face;
+    }
+}
+
+void FontSet::setLanguageFonts(const std::string& language, std::vector<std::string> families) {
+    const std::string key = lowerAscii(language);
+    if (families.empty()) languageFonts_.erase(key);
+    else languageFonts_[key] = std::move(families);
+}
+
+std::vector<std::string> FontSet::languageFonts(const std::string& language) const {
+    std::vector<std::string> out;
+    if (language.empty()) return out;
+    auto it = languageFonts_.find(lowerAscii(language));
+    if (it == languageFonts_.end()) it = languageFonts_.find(primaryLanguage(language));
+    if (it != languageFonts_.end()) out = it->second;
+    for (const auto& e : entries_) {
+        if (e->languageMatches(language) &&
+            std::find(out.begin(), out.end(), e->decl.key) == out.end()) {
+            out.push_back(e->decl.key);
+        }
+    }
+    return out;
+}
+
+std::shared_ptr<glyphware::Face> FontSet::resolve(const FontSpec& spec, char32_t cp,
+                                                  const std::string& language) {
+    std::shared_ptr<glyphware::Face> first;
+    auto tryName = [&](const std::string& name) -> std::shared_ptr<glyphware::Face> {
+        // 同じ名前の登録を近い順に見て、cp を持つ最初のものを返す。カバレッジは宣言の ranges があれば開かずに判定
+        std::vector<Entry*> seen;
+        for (;;) {
+            Entry* e = nullptr;
+            int bestScore = 0;
+            for (auto& up : entries_) {
+                Entry& c = *up;
+                if (c.failed || !c.matches(name)) continue;
+                if (std::find(seen.begin(), seen.end(), &c) != seen.end()) continue;
+                const int score = (c.italic == spec.italic ? 0 : 100000) + weightDistance(spec.weight, c.weight);
+                if (!e || score < bestScore) { e = &c; bestScore = score; }
+            }
+            if (!e) return nullptr;
+            seen.push_back(e);
+            if (covers(*e, cp)) return e->face;
+            if (!first && e->face) first = e->face;
+        }
+    };
+    for (const std::string& name : languageFonts(language)) {
+        if (auto face = tryName(name)) return face;
+    }
+    for (const std::string& name : spec.family) {
+        if (auto face = tryName(name)) return face;
+    }
+    if (first) return first;
+    // どの名前も無い: 開けるものの先頭
+    for (auto& up : entries_) {
+        if (auto face = faceOf(up.get())) return face;
     }
     return nullptr;
 }
 
-std::shared_ptr<glyphware::Face> FontSet::resolve(const FontSpec& spec, char32_t cp) const {
-    std::shared_ptr<glyphware::Face> first;
+std::shared_ptr<glyphware::Face> FontSet::primary(const FontSpec& spec) {
     for (const std::string& name : spec.family) {
-        auto face = find(name);
-        if (!face) continue;
-        if (!first) first = face;
-        if (face->covers(cp)) return face;
+        if (auto face = select(name, spec.weight, spec.italic)) return face;
     }
-    if (!first && !faces_.empty()) first = faces_.begin()->second;
-    return first;
-}
-
-std::shared_ptr<glyphware::Face> FontSet::primary(const FontSpec& spec) const {
-    for (const std::string& name : spec.family) {
-        auto face = find(name);
-        if (face) return face;
+    for (auto& up : entries_) {
+        if (auto face = faceOf(up.get())) return face;
     }
-    return faces_.empty() ? nullptr : faces_.begin()->second;
+    return nullptr;
 }
 
 hb_font_t* FontSet::hbFont(const glyphware::Face& face) {

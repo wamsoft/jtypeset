@@ -58,7 +58,7 @@ std::vector<Segment> itemize(const std::u16string& text, const std::vector<Style
                 i += len;
                 continue;
             }
-            auto face = ctx.fonts.resolve(style.font, cp);
+            auto face = ctx.fonts.resolve(style.font, cp, style.language);
             const bool upright = resolveUpright(ctx.writingMode, ori, cp);
             if (!segs.empty()) {
                 Segment& last = segs.back();

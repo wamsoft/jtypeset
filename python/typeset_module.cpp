@@ -144,8 +144,62 @@ Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
         .value("KNUTH_PLASS", LineBreakStrategy::KnuthPlass);
 
     // ---- フォント ----
-    py::class_<font::FontSet>(m, "FontSet", "フォントの集合。load_file / load_bytes で開き、TextStyle の family（キーまたは family 名）で引く。文字が無ければ次の family へフォールバックする")
+    py::class_<glyphware::CodepointRange>(m, "CodepointRange", "コードポイントの範囲（両端含む）")
+        .def(py::init([](uint32_t lo, uint32_t hi) { return glyphware::CodepointRange{lo, hi}; }),
+             py::arg("lo"), py::arg("hi"))
+        .def_readwrite("lo", &glyphware::CodepointRange::lo)
+        .def_readwrite("hi", &glyphware::CodepointRange::hi);
+    py::class_<font::FontDeclaration>(m, "FontDeclaration",
+                                      "開かずに登録するフォントのメタデータ（キー・ファイル・family 別名・weight・italic・languages・ranges）")
         .def(py::init<>())
+        .def_readwrite("key", &font::FontDeclaration::key)
+        .def_readwrite("path", &font::FontDeclaration::path)
+        .def_readwrite("face_index", &font::FontDeclaration::faceIndex)
+        .def_readwrite("family", &font::FontDeclaration::family)
+        .def_readwrite("weight", &font::FontDeclaration::weight, "100〜900。0 でフォントから")
+        .def_readwrite("italic", &font::FontDeclaration::italic, "None でフォントから")
+        .def_readwrite("languages", &font::FontDeclaration::languages, "BCP47。この言語のテキストで先に試される")
+        .def_readwrite("ranges", &font::FontDeclaration::ranges, "カバレッジ（空なら開いて cmap を見る）");
+    py::class_<font::FontSet>(m, "FontSet",
+                              "フォントの集合。load_file / load_bytes で開くか declare で宣言（初回使用時に開く）し、"
+                              "TextStyle の family（キーまたは family 名）で引く。同じ family の複数 face から weight / italic の"
+                              "最近傍を選び、文字が無ければ次の family へフォールバックする。set_language_fonts で言語ごとに先に試す family を指定できる")
+        .def(py::init<>())
+        .def("declare",
+             [](font::FontSet& fs, const std::string& path, const std::string& key, std::vector<std::string> family,
+                int weight, std::optional<bool> italic, std::vector<std::string> languages,
+                std::vector<glyphware::CodepointRange> ranges, int index) {
+                 font::FontDeclaration d;
+                 d.key = key.empty() ? path : key;
+                 d.path = path;
+                 d.faceIndex = index;
+                 d.family = std::move(family);
+                 d.weight = weight;
+                 d.italic = italic;
+                 d.languages = std::move(languages);
+                 d.ranges = std::move(ranges);
+                 return fs.declare(std::move(d));
+             },
+             py::arg("path"), py::arg("key") = std::string(), py::arg("family") = std::vector<std::string>{},
+             py::arg("weight") = 0, py::arg("italic") = std::nullopt,
+             py::arg("languages") = std::vector<std::string>{},
+             py::arg("ranges") = std::vector<glyphware::CodepointRange>{}, py::arg("face_index") = 0,
+             "開かずに宣言する（初回使用時に開く）。key を省略するとパスがキー。weight=0 / italic=None はフォントから取る")
+        .def("declare", [](font::FontSet& fs, font::FontDeclaration d) { return fs.declare(std::move(d)); },
+             py::arg("declaration"))
+        .def("has", &font::FontSet::has, py::arg("key"), "登録済みか（開いていなくてもよい）")
+        .def("is_loaded", &font::FontSet::isLoaded, py::arg("key"), "開いているか")
+        .def("keys", &font::FontSet::keys, "登録したキー（登録順）")
+        .def("set_language_fonts", &font::FontSet::setLanguageFonts, py::arg("language"), py::arg("families"),
+             "この言語のテキストで先に試す family 列（空で削除）。\"zh-Hans\" の完全一致が無ければ \"zh\" を使う")
+        .def("language_fonts", &font::FontSet::languageFonts, py::arg("language"))
+        .def("select",
+             [](font::FontSet& fs, const std::string& name, int weight, bool italic) {
+                 auto face = fs.select(name, weight, italic);
+                 return face ? std::optional<std::string>(face->descriptor().key) : std::nullopt;
+             },
+             py::arg("name"), py::arg("weight") = 400, py::arg("italic") = false,
+             "キー／family 名と weight / italic に最も近い face のキー（無ければ None）。必要なら開く")
         .def("load_file",
              [](font::FontSet& fs, const std::string& path, const std::string& key, int index) {
                  return static_cast<bool>(fs.loadFile(path, key, index));
