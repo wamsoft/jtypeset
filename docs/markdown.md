@@ -44,6 +44,9 @@ jtypeset-md hello.md            # hello.pdf ができる
 jtypeset-md hello.md --png 120  # hello_p1.png … も出す（確認用）
 ```
 
+`**強調**` の太字は、同じ書体の Bold（`data/NotoSerifJP-Bold.otf`、Windows の游明朝 Demibold、Linux の Noto CJK Bold など）が
+見つかればそれを使い、無ければ合成します。
+
 フォントを指定しなければ、カレントの `data/` の Noto → OS のフォント（Windows: 游明朝・游ゴシック、macOS: ヒラギノ、
 Linux: Noto CJK）の順に探します。見つからなければエラーになるので、`--font` か front matter の `fonts` で指定してください。
 絵文字は `data/` の Noto 絵文字フォント（`make fontdata`）か OS のカラー絵文字フォント（Segoe UI Emoji / Apple Color Emoji /
@@ -86,6 +89,7 @@ direction: auto           # auto / ltr / rtl（段落の基底方向。行内の
 wrap: mixed               # mixed / char / word / none（折返し: 既定は和文が字ごと・欧文が語ごと）
 lang: ja                  # 本文の言語（BCP47）
 hyphenation: hyph-en-us.tex   # 欧文のハイフネーション（TeX のパターン。{en: 〜.tex} と言語ごとにも書ける）
+                              # 本文が lang: ja でも、最初に読んだ言語のパターンで欧文の単語を割る
 kinsoku: strict           # strict / normal / loose（禁則の強さ。狭い段では normal / loose で行末が揃いやすい）
 ruby-offset: 0            # ルビと親文字の間隔（親文字の em）
 columns: 1

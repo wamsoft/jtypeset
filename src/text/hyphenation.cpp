@@ -198,14 +198,24 @@ std::string primaryLanguage(const std::string& language) {
 } // namespace
 
 Hyphenator& HyphenationDictionary::forLanguage(const std::string& language) {
-    return byLanguage_[lowerAscii(language)];
+    const std::string key = lowerAscii(language);
+    if (default_.empty()) default_ = key;      // 最初に足した言語を既定にする
+    return byLanguage_[key];
+}
+
+void HyphenationDictionary::setDefaultLanguage(const std::string& language) {
+    default_ = lowerAscii(language);
 }
 
 const Hyphenator* HyphenationDictionary::find(const std::string& language) const {
-    if (language.empty()) return nullptr;
-    auto it = byLanguage_.find(lowerAscii(language));
-    if (it == byLanguage_.end()) it = byLanguage_.find(primaryLanguage(language));
-    return it == byLanguage_.end() ? nullptr : &it->second;
+    auto lookup = [&](const std::string& key) -> const Hyphenator* {
+        if (key.empty()) return nullptr;
+        auto it = byLanguage_.find(key);
+        if (it == byLanguage_.end()) it = byLanguage_.find(primaryLanguage(key));
+        return it == byLanguage_.end() ? nullptr : &it->second;
+    };
+    if (const Hyphenator* h = lookup(lowerAscii(language))) return h;
+    return lookup(default_);
 }
 
 } // namespace typeset::text

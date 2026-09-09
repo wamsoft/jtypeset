@@ -53,19 +53,26 @@ private:
 
 /**
  * 言語ごとのパターン。`TextStyle::language`（BCP47）で引く。
- * 完全一致 → 主言語（"en-GB" なら "en"）の順に探す
+ * 完全一致 → 主言語（"en-GB" なら "en"）→ 既定の言語（setDefaultLanguage）の順に探す。
+ *
+ * 既定の言語は「和文の文書に混ざる英単語」のためのもの。本文の言語が `ja` でも、欧文のハイフネーションは
+ * その言語のパターンで行いたい、という指定に使う（`forLanguage()` で最初に足した言語が自動で既定になる）
  */
 class HyphenationDictionary {
 public:
-    /// 言語にパターンを足す（無ければ作る）
+    /// 言語にパターンを足す（無ければ作る）。最初に足した言語が既定になる
     Hyphenator& forLanguage(const std::string& language);
-    /// 言語のパターン（無ければ nullptr）
+    /// 言語のパターン（無ければ既定の言語、それも無ければ nullptr）
     const Hyphenator* find(const std::string& language) const;
+    /// 見つからなかったときに使う言語（空で無効）
+    void setDefaultLanguage(const std::string& language);
+    const std::string& defaultLanguage() const { return default_; }
     bool empty() const { return byLanguage_.empty(); }
 
 private:
     /// std::map なので、返した参照は要素を消さないかぎり有効
     std::map<std::string, Hyphenator> byLanguage_;
+    std::string default_;
 };
 
 /// ソフトハイフン

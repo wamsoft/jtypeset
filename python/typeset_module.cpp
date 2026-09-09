@@ -392,6 +392,9 @@ Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
              py::return_value_policy::reference_internal, "その言語の Hyphenator（無ければ作る）")
         .def("find", &text::HyphenationDictionary::find, py::arg("language"),
              py::return_value_policy::reference_internal)
+        .def("set_default_language", &text::HyphenationDictionary::setDefaultLanguage, py::arg("language"),
+             "その言語のパターンが無いときに使う言語（和文の文書に混ざる英単語のため）。最初に足した言語が既定")
+        .def_property_readonly("default_language", &text::HyphenationDictionary::defaultLanguage)
         .def("empty", &text::HyphenationDictionary::empty);
     py::class_<BreakOptions>(m, "BreakOptions", "行分割の方法（Greedy / Knuth–Plass）と両端揃え")
         .def(py::init<>())

@@ -747,6 +747,13 @@ class HyphenationDictionary:
         """
         その言語の Hyphenator（無ければ作る）
         """
+    def set_default_language(self, language: str) -> None:
+        """
+        その言語のパターンが無いときに使う言語（和文の文書に混ざる英単語のため）。最初に足した言語が既定
+        """
+    @property
+    def default_language(self) -> str:
+        ...
 class Hyphenator:
     """
     欧文のハイフネーション（Liang のパターン）。TeX の hyph-*.tex を読ませて使う

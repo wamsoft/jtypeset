@@ -61,6 +61,23 @@ DEFAULT_FONT_CANDIDATES = {
     ],
 }
 
+# 太字の face（あれば **強調** で使う。無ければ今までどおり合成ボールドになる）。
+# 見つかっても実際に太字を使うまで開かない（declare）
+DEFAULT_BOLD_CANDIDATES = {
+    "serif": [
+        "data/NotoSerifJP-Bold.otf",
+        "C:/Windows/Fonts/yumindb.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc",
+        "/usr/share/fonts/noto-cjk/NotoSerifCJK-Bold.ttc",
+    ],
+    "sans": [
+        "data/NotoSansJP-Bold.otf",
+        "C:/Windows/Fonts/YuGothB.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Bold.ttc",
+    ],
+}
+
 
 @dataclass
 class Options:
@@ -244,6 +261,17 @@ class Converter:
                     full = cand if os.path.exists(cand) else ""
                 if full and self.fonts.load_file(full, key):
                     loaded[key] = True
+                    break
+        # 太字の face（同じ family 名で weight 700 として宣言する。使うまで開かない）
+        for key in ("serif", "sans"):
+            if key not in loaded or f"{key}-bold" in loaded:
+                continue
+            for cand in DEFAULT_BOLD_CANDIDATES.get(key, []):
+                full = cand if os.path.isabs(cand) else os.path.join(self.base_dir, cand)
+                if not os.path.exists(full):
+                    full = cand if os.path.exists(cand) else ""
+                if full:
+                    self.fonts.declare(full, f"{key}-bold", [key], 700)
                     break
         if self.fonts.size == 0:
             raise RuntimeError("no font could be loaded: specify fonts in the front matter or --font")

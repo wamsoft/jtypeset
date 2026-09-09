@@ -97,3 +97,4 @@ samples-md:
 	PYTHONPATH=$(PYPKG) python -m jtypeset.md samples/markdown/report.md -o docs/samples/report.pdf --png 90
 	PYTHONPATH=$(PYPKG) python -m jtypeset.md samples/markdown/report.md -o docs/samples/report_vertical.pdf --vertical --paper A5 --png 90
 	rm -f docs/samples/report_p[2-9]*.png docs/samples/report_vertical_p[2-9]*.png
+	rm -f docs/samples/report_p1[0-9]*.png docs/samples/report_vertical_p1[0-9]*.png

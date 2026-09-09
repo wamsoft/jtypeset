@@ -1893,8 +1893,16 @@ TEST_CASE("hyphenation: Liang patterns, exceptions and soft hyphens split words 
     dict.forLanguage("en").addPatterns("\\patterns{ hy3ph he2n hena4 1na 4tion na1t }");
     CHECK(dict.find("en") != nullptr);
     CHECK(dict.find("en-US") != nullptr);        // 主言語で引ける
-    CHECK(dict.find("de") == nullptr);
+    // 最初に足した言語が既定になるので、パターンを持たない言語（和文の文書に混ざる英単語）でも引ける
+    CHECK(dict.defaultLanguage() == "en");
+    CHECK(dict.find("ja") == dict.find("en"));
+    CHECK(dict.find("") == dict.find("en"));
+    dict.setDefaultLanguage("");                 // 既定を切ると厳密になる
+    CHECK(dict.find("ja") == nullptr);
     CHECK(dict.find("") == nullptr);
+    CHECK(dict.find("en") != nullptr);
+    dict.setDefaultLanguage("en");
+    CHECK(dict.find("de") != nullptr);
 
     // --- 組版: 単語の途中で切れてハイフンが出る ---
     Fixture fx;
