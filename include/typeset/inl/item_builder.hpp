@@ -34,6 +34,11 @@ struct ItemBuildContext {
     float letterSpacing = 0.0f;
     /// 欧文間隔を固定幅の箱にする（ParagraphStyle::preserveSpaces）
     bool preserveSpaces = false;
+    /// 折返しの方式（BreakOptions::wrap）
+    WrapMode wrap = WrapMode::Mixed;
+    /// タブストップ（空なら tabWidth × em ごと）
+    const std::vector<TabStop>* tabStops = nullptr;
+    int tabWidth = 4;
 };
 
 /**

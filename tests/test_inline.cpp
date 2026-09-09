@@ -1271,3 +1271,333 @@ TEST_CASE("bidi: RTL runs are reordered visually within the line, in horizontal 
         CHECK(boxes.back().charIndex == frag.lines[0].charStart);
     }
 }
+
+TEST_CASE("wrap modes: char breaks inside a word, word keeps kana together, none overflows") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+    inl::ParagraphLayouter layouter(fx.fonts);
+    const inl::ConstantLineShape shape(60.0f);
+    const std::u16string text = u"あいうえお internationalization かきくけこ";
+
+    auto run = [&](WrapMode w) {
+        inl::Paragraph p = inl::Paragraph::plain(text, fx.style(10.0f));
+        p.style.align = Align::Start;
+        p.style.lineBreak.justify = false;
+        p.style.lineBreak.wrap = w;
+        return layouter.layout(p, WritingMode::HorizontalTb, shape);
+    };
+
+    // Mixed（既定）: 和文は字ごと、欧文は語ごと。長い欧単語は行長を超える
+    const inl::ParagraphFragment mixed = run(WrapMode::Mixed);
+    REQUIRE(mixed.lines.size() >= 3);
+    Pt longestMixed = 0.0f;
+    for (const inl::LineBox& l : mixed.lines) longestMixed = std::max(longestMixed, l.naturalLength);
+    CHECK(longestMixed > 60.0f);
+
+    // Char: 欧単語の途中でも切るので、どの行も行長に収まる
+    const inl::ParagraphFragment ch = run(WrapMode::Char);
+    for (const inl::LineBox& l : ch.lines) CHECK(l.naturalLength <= 60.0f + 0.01f);
+    CHECK(ch.lines.size() >= mixed.lines.size());
+
+    // Word: 和文も語（UAX #14）でしか切らないので、仮名の連続は切れない
+    const inl::ParagraphFragment wd = run(WrapMode::Word);
+    for (const inl::LineBox& l : wd.lines) {
+        if (l.charEnd < text.size() && l.charEnd > 0) {
+            // 行末が仮名同士の境目になっていない
+            const char32_t a = text::codePointAt(text, l.charEnd - 1);
+            const char32_t b = text::codePointAt(text, l.charEnd);
+            const bool bothKana = text::getCharClass(a) == text::CharClass::Hiragana &&
+                                  text::getCharClass(b) == text::CharClass::Hiragana;
+            CHECK(!bothKana);
+        }
+    }
+
+    // None: 改行以外で切らない（1 行のまま）
+    const inl::ParagraphFragment none = run(WrapMode::None);
+    CHECK(none.lines.size() == 1);
+    CHECK(none.lines[0].charEnd == text.size());
+    CHECK(none.lines[0].naturalLength > 60.0f);
+}
+
+TEST_CASE("ellipsis: the last line is truncated with the ellipsis when maxLines cuts the text") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+    inl::ParagraphLayouter layouter(fx.fonts);
+    const inl::ConstantLineShape shape(60.0f);
+    inl::Paragraph p = inl::Paragraph::plain(u"吾輩は猫である。名前はまだ無い。どこで生れたかとんと見当がつかぬ。", fx.style(10.0f));
+    p.style.align = Align::Start;
+    p.style.lineBreak.justify = false;
+
+    const inl::ParagraphFragment cut = layouter.layout(p, WritingMode::HorizontalTb, shape, 0, 2);
+    REQUIRE(cut.lines.size() == 2);
+    CHECK(!cut.complete);
+
+    p.style.ellipsis = u"…";
+    const inl::ParagraphFragment ell = layouter.layout(p, WritingMode::HorizontalTb, shape, 0, 2);
+    REQUIRE(ell.lines.size() == 2);
+    CHECK(!ell.complete);
+    // 最後の行は行長に収まり、末尾に「…」のグリフが増えている
+    CHECK(ell.lines[1].naturalLength <= 60.0f + 0.01f);
+    CHECK(ell.lines[1].glyphs.size() >= 2);
+    const inl::PlacedGlyph& last = ell.lines[1].glyphs.back();
+    CHECK(last.charIndex == std::numeric_limits<uint32_t>::max());
+    // 本文は「…」のぶん短くなる
+    CHECK(ell.lines[1].charEnd <= cut.lines[1].charEnd);
+    // 1 行目は変わらない
+    CHECK(ell.lines[0].charEnd == cut.lines[0].charEnd);
+    // 全部組めるときは足さない
+    const inl::ParagraphFragment full = layouter.layout(p, WritingMode::HorizontalTb, shape);
+    CHECK(full.complete);
+    for (const inl::PlacedGlyph& g : full.lines.back().glyphs) {
+        CHECK(g.charIndex != std::numeric_limits<uint32_t>::max());
+    }
+}
+
+TEST_CASE("kinsoku levels and custom characters change where a line may break") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+    inl::ParagraphLayouter layouter(fx.fonts);
+    // 行長 30pt（3 字）。4 字目が長音「ー」= 行頭禁則（弱い）
+    const inl::ConstantLineShape shape(30.0f);
+    auto lines = [&](KinsokuLevel level, const std::u16string& text) {
+        inl::Paragraph p = inl::Paragraph::plain(text, fx.style(10.0f));
+        p.style.align = Align::Start;
+        p.style.lineBreak.justify = false;
+        p.style.spacing.kinsoku = level;
+        p.style.spacing.kanjiSkipStretch = 0.0f;
+        return layouter.layout(p, WritingMode::HorizontalTb, shape);
+    };
+    // Strict: 「ー」を行頭に置けないので 3 字目から追い出す
+    const inl::ParagraphFragment strict = lines(KinsokuLevel::Strict, u"アイウーエオカキ");
+    CHECK(strict.lines[0].charEnd == 2);
+    // Normal: 弱い禁則なので、詰まっていれば行頭に来てよい
+    const inl::ParagraphFragment normal = lines(KinsokuLevel::Normal, u"アイウーエオカキ");
+    CHECK(normal.lines[0].charEnd == 3);
+
+    // Loose: 句点も弱い禁則
+    const inl::ParagraphFragment strictStop = lines(KinsokuLevel::Strict, u"アイウ。エオカキ");
+    CHECK(strictStop.lines[0].charEnd == 2);
+    const inl::ParagraphFragment loose = lines(KinsokuLevel::Loose, u"アイウ。エオカキ");
+    CHECK(loose.lines[0].charEnd == 3);
+    // Normal では句点は強いまま
+    const inl::ParagraphFragment normalStop = lines(KinsokuLevel::Normal, u"アイウ。エオカキ");
+    CHECK(normalStop.lines[0].charEnd == 2);
+
+    // 追加・除外リスト: クラスより優先する
+    {
+        inl::Paragraph p = inl::Paragraph::plain(u"アイウエオカキ", fx.style(10.0f));
+        p.style.align = Align::Start;
+        p.style.lineBreak.justify = false;
+        p.style.spacing.kanjiSkipStretch = 0.0f;
+        p.style.spacing.lineStartProhibited = u"エ";     // 「エ」を行頭に置かない
+        const inl::ParagraphFragment f = layouter.layout(p, WritingMode::HorizontalTb, shape);
+        CHECK(f.lines[0].charEnd == 2);
+    }
+    {
+        inl::Paragraph p = inl::Paragraph::plain(u"アイウ。エオカキ", fx.style(10.0f));
+        p.style.align = Align::Start;
+        p.style.lineBreak.justify = false;
+        p.style.spacing.kanjiSkipStretch = 0.0f;
+        p.style.spacing.lineStartAllowed = u"。";        // 句点を行頭禁則から外す
+        const inl::ParagraphFragment f = layouter.layout(p, WritingMode::HorizontalTb, shape);
+        CHECK(f.lines[0].charEnd == 3);
+    }
+    {
+        inl::Paragraph p = inl::Paragraph::plain(u"アイウエオカキ", fx.style(10.0f));
+        p.style.align = Align::Start;
+        p.style.lineBreak.justify = false;
+        p.style.spacing.kanjiSkipStretch = 0.0f;
+        p.style.spacing.lineEndProhibited = u"ウ";       // 「ウ」を行末に置かない
+        const inl::ParagraphFragment f = layouter.layout(p, WritingMode::HorizontalTb, shape);
+        CHECK(f.lines[0].charEnd == 2);
+    }
+}
+
+TEST_CASE("hanging indent and mid-paragraph indent shift the line heads") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+    inl::ParagraphLayouter layouter(fx.fonts);
+    const inl::ConstantLineShape shape(100.0f);
+    const std::u16string text = u"吾輩は猫である。名前はまだ無い。どこで生れたかとんと見当がつかぬ。";
+
+    // ぶら下げインデント: 1 行目は一字下げ、2 行目以降は 2em
+    inl::Paragraph p = inl::Paragraph::plain(text, fx.style(10.0f));
+    p.style.firstLineIndent = 1.0f;
+    p.style.hangingIndent = 2.0f;
+    const inl::ParagraphFragment frag = layouter.layout(p, WritingMode::HorizontalTb, shape);
+    REQUIRE(frag.lines.size() >= 3);
+    CHECK(frag.lines[0].indent == doctest::Approx(10.0f));
+    CHECK(frag.lines[1].indent == doctest::Approx(20.0f));
+    CHECK(frag.lines[2].indent == doctest::Approx(20.0f));
+    for (size_t i = 0; i + 1 < frag.lines.size(); ++i) {
+        CHECK(frag.lines[i].length == doctest::Approx(100.0f - frag.lines[i].indent).epsilon(0.01));
+    }
+
+    // 途中からの字下げ（Indent 注記）: 指定範囲に行頭がある行だけ下がる
+    inl::Paragraph q = inl::Paragraph::plain(text, fx.style(10.0f));
+    q.style.firstLineIndent = 0.0f;
+    const inl::ParagraphFragment base = layouter.layout(q, WritingMode::HorizontalTb, shape);
+    REQUIRE(base.lines.size() >= 3);
+    q.annotations.push_back(inl::Annotation::indent(base.lines[1].charStart, text.size(), 3.0f));
+    const inl::ParagraphFragment ind = layouter.layout(q, WritingMode::HorizontalTb, shape);
+    REQUIRE(ind.lines.size() >= 3);
+    CHECK(ind.lines[0].indent == doctest::Approx(0.0f));
+    CHECK(ind.lines[1].indent == doctest::Approx(30.0f));
+    CHECK(ind.lines[1].length == doctest::Approx(70.0f).epsilon(0.02));
+}
+
+TEST_CASE("tab stops and moveTo place text at absolute inline positions") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+    inl::ParagraphLayouter layouter(fx.fonts);
+    const inl::ConstantLineShape shape(400.0f);
+    const TextStyle st = fx.style(10.0f);
+
+    // 既定のタブ（tabWidth × em ごとの左揃え）
+    {
+        inl::Paragraph p = inl::Paragraph::plain(u"あ\tい\tう", st);
+        p.style.align = Align::Start;
+        p.style.lineBreak.justify = false;
+        p.style.tabWidth = 4;    // 40pt ごと
+        const inl::ParagraphFragment f = layouter.layout(p, WritingMode::HorizontalTb, shape);
+        REQUIRE(f.lines.size() == 1);
+        const auto boxes = inl::charBoxes(f, WritingMode::HorizontalTb, 0);
+        REQUIRE(boxes.size() >= 3);
+        CHECK(boxes[0].inlineStart == doctest::Approx(0.0f));
+        // 「い」は 40pt、「う」は 80pt から
+        Pt posI = -1.0f, posU = -1.0f;
+        for (const inl::CharBox& b : boxes) {
+            if (b.charIndex == 2) posI = b.inlineStart;
+            if (b.charIndex == 4) posU = b.inlineStart;
+        }
+        CHECK(posI == doctest::Approx(40.0f));
+        CHECK(posU == doctest::Approx(80.0f));
+    }
+    // タブストップの指定（左・右・中央揃え）
+    {
+        inl::Paragraph p = inl::Paragraph::plain(u"あ\tいろは\tにほ", st);
+        p.style.align = Align::Start;
+        p.style.lineBreak.justify = false;
+        p.style.tabStops = {TabStop{50.0f, TabAlign::Left}, TabStop{200.0f, TabAlign::Right}};
+        const inl::ParagraphFragment f = layouter.layout(p, WritingMode::HorizontalTb, shape);
+        REQUIRE(f.lines.size() == 1);
+        const auto boxes = inl::charBoxes(f, WritingMode::HorizontalTb, 0);
+        Pt posI = -1.0f;
+        Pt endLast = 0.0f;
+        for (const inl::CharBox& b : boxes) {
+            if (b.charIndex == 2) posI = b.inlineStart;
+            endLast = std::max(endLast, b.inlineEnd);
+        }
+        CHECK(posI == doctest::Approx(50.0f));
+        CHECK(endLast == doctest::Approx(200.0f).epsilon(0.02));   // 右揃えタブ: 末尾が 200pt
+    }
+    // MoveTo: 指定位置から始める。既に超えていれば何もしない
+    {
+        inl::Paragraph p = inl::Paragraph::plain(u"あいうえお", st);
+        p.style.align = Align::Start;
+        p.style.lineBreak.justify = false;
+        p.annotations.push_back(inl::Annotation::moveTo(2, 100.0f));
+        const inl::ParagraphFragment f = layouter.layout(p, WritingMode::HorizontalTb, shape);
+        const auto boxes = inl::charBoxes(f, WritingMode::HorizontalTb, 0);
+        Pt posU = -1.0f;
+        for (const inl::CharBox& b : boxes) if (b.charIndex == 2) posU = b.inlineStart;
+        CHECK(posU == doctest::Approx(100.0f));
+    }
+    {
+        inl::Paragraph p = inl::Paragraph::plain(u"あいうえお", st);
+        p.style.align = Align::Start;
+        p.style.lineBreak.justify = false;
+        p.annotations.push_back(inl::Annotation::moveTo(4, 5.0f));   // 既に 40pt なので無視
+        const inl::ParagraphFragment f = layouter.layout(p, WritingMode::HorizontalTb, shape);
+        const auto boxes = inl::charBoxes(f, WritingMode::HorizontalTb, 0);
+        Pt posO = -1.0f;
+        for (const inl::CharBox& b : boxes) if (b.charIndex == 4) posO = b.inlineStart;
+        CHECK(posO == doctest::Approx(40.0f));
+    }
+}
+
+TEST_CASE("fitParagraph shrinks the text until it fits the line count, originInBox aligns it in a box") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+    inl::ParagraphLayouter layouter(fx.fonts);
+    const inl::ConstantLineShape shape(100.0f);
+    inl::Paragraph p = inl::Paragraph::plain(
+        u"吾輩は猫である。名前はまだ無い。どこで生れたかとんと見当がつかぬ。", fx.style(10.0f));
+
+    // そのままなら 4 行。3 行に収める
+    const inl::ParagraphFragment plain = layouter.layout(p, WritingMode::HorizontalTb, shape);
+    REQUIRE(plain.lines.size() >= 4);
+    const inl::FitResult fit = inl::fitParagraph(layouter, p, WritingMode::HorizontalTb, shape, 3);
+    CHECK(fit.fits);
+    CHECK(fit.scale < 1.0f);
+    CHECK(fit.fragment.complete);
+    CHECK(fit.fragment.lines.size() <= 3);
+    // 収まるなら縮めない
+    const inl::FitResult noShrink = inl::fitParagraph(layouter, p, WritingMode::HorizontalTb, shape, 10);
+    CHECK(noShrink.scale == 1.0f);
+    CHECK(noShrink.fits);
+    // 縮めても無理なら fits = false
+    const inl::FitResult impossible = inl::fitParagraph(layouter, p, WritingMode::HorizontalTb, shape, 1);
+    CHECK(!impossible.fits);
+
+    // 箱の中での天地・左右揃え
+    const Rect box{10.0f, 20.0f, 100.0f, 200.0f};
+    const inl::ParagraphFragment frag = layouter.layout(p, WritingMode::HorizontalTb, shape);
+    const Pt extent = frag.blockExtent();
+    const Point top = inl::originInBox(frag, WritingMode::HorizontalTb, box, BlockAlign::Start);
+    const Point mid = inl::originInBox(frag, WritingMode::HorizontalTb, box, BlockAlign::Center);
+    const Point bot = inl::originInBox(frag, WritingMode::HorizontalTb, box, BlockAlign::End);
+    CHECK(top.x == doctest::Approx(10.0f));
+    CHECK(top.y == doctest::Approx(20.0f + frag.linePitch * 0.5f));
+    CHECK(mid.y == doctest::Approx(20.0f + (200.0f - extent) * 0.5f + frag.linePitch * 0.5f));
+    CHECK(bot.y == doctest::Approx(20.0f + 200.0f - extent + frag.linePitch * 0.5f));
+    // 縦組みは列が右から
+    const inl::ParagraphFragment vf = layouter.layout(p, WritingMode::VerticalRl, shape);
+    const Point v = inl::originInBox(vf, WritingMode::VerticalRl, box, BlockAlign::Start);
+    CHECK(v.x == doctest::Approx(box.right() - vf.linePitch * 0.5f));
+    CHECK(v.y == doctest::Approx(20.0f));
+}
+
+TEST_CASE("ruby and emphasis offset move the annotation away from the parent characters") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+    inl::ParagraphLayouter layouter(fx.fonts);
+    const inl::ConstantLineShape shape(200.0f);
+    const TextStyle st = fx.style(10.0f);
+
+    auto rubyBlock = [&](float offset, WritingMode wm) {
+        inl::Paragraph p = inl::Paragraph::plain(u"吾輩は猫", st);
+        inl::Annotation a = inl::Annotation::ruby(0, 2, u"わがはい");
+        a.offset = offset;
+        p.annotations.push_back(a);
+        const inl::ParagraphFragment f = layouter.layout(p, wm, shape);
+        Pt extreme = 0.0f;
+        for (const inl::PlacedGlyph& g : f.lines[0].glyphs) {
+            if (!g.annotation) continue;
+            extreme = isVertical(wm) ? std::max(extreme, g.block) : std::min(extreme, g.block);
+        }
+        return std::make_pair(extreme, f.lines[0].blockMax - f.lines[0].blockMin);
+    };
+    // 横組み: ルビは上（block 負）。offset で更に上へ、行の張り出しも増える
+    const auto h0 = rubyBlock(0.0f, WritingMode::HorizontalTb);
+    const auto h1 = rubyBlock(0.3f, WritingMode::HorizontalTb);
+    CHECK(h1.first == doctest::Approx(h0.first - 3.0f));
+    CHECK(h1.second == doctest::Approx(h0.second + 3.0f));
+    // 縦組み: ルビは右（block 正）
+    const auto v0 = rubyBlock(0.0f, WritingMode::VerticalRl);
+    const auto v1 = rubyBlock(0.3f, WritingMode::VerticalRl);
+    CHECK(v1.first == doctest::Approx(v0.first + 3.0f));
+
+    // 圏点も同じ
+    auto emphasisBlock = [&](float offset) {
+        inl::Paragraph p = inl::Paragraph::plain(u"吾輩は猫", st);
+        inl::Annotation a = inl::Annotation::emphasis(0, 2);
+        a.offset = offset;
+        p.annotations.push_back(a);
+        const inl::ParagraphFragment f = layouter.layout(p, WritingMode::HorizontalTb, shape);
+        Pt top = 0.0f;
+        for (const inl::PlacedGlyph& g : f.lines[0].glyphs) if (g.annotation) top = std::min(top, g.block);
+        return top;
+    };
+    CHECK(emphasisBlock(0.2f) == doctest::Approx(emphasisBlock(0.0f) - 2.0f));
+}

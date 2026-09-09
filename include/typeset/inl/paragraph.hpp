@@ -219,7 +219,10 @@ private:
     ParagraphFragment layoutOnce(const Paragraph& para, WritingMode wm,
                                  const LineShapeProvider& shape,
                                  size_t charStart, int maxLines, int firstLineIndex);
+    void applyEllipsis(ParagraphFragment& frag, const Paragraph& para, WritingMode wm,
+                       const LineShapeProvider& shape);
     font::FontSet& fonts_;
+    std::vector<Pt> lineIndents_;   ///< Indent 注記による行ごとの字下げ（layout の反復で埋める。負は無し）
 };
 
 /**
@@ -308,6 +311,25 @@ std::optional<HitResult> hitTest(const ParagraphFragment& frag, WritingMode wm, 
  */
 std::optional<Rect> caretRect(const ParagraphFragment& frag, WritingMode wm, Point origin, size_t charIndex,
                               int lineOffset = 0, Pt thickness = 1.0f);
+
+/**
+ * 箱の中での段落の位置: 行送り方向に blockAlign、行の方向に align（Justify は Start 扱い）で揃えた origin
+ * （emitParagraph に渡す 1 行目の行頭）を返す。段落は箱の行長で組んであること
+ */
+Point originInBox(const ParagraphFragment& frag, WritingMode wm, const Rect& box,
+                  BlockAlign blockAlign = BlockAlign::Start, Align align = Align::Start);
+
+/**
+ * 自動縮小: 行数上限に収まるまで文字サイズ（と linePitch）を段階的に縮めて組み直す
+ */
+struct FitResult {
+    ParagraphFragment fragment;
+    float scale = 1.0f;             ///< 採用した倍率（1 なら縮めていない）
+    bool fits = true;               ///< minScale まで縮めても収まらなければ false（fragment は minScale の結果）
+};
+FitResult fitParagraph(ParagraphLayouter& layouter, const Paragraph& para, WritingMode wm,
+                       const LineShapeProvider& shape, int maxLines,
+                       float minScale = 0.5f, float step = 0.05f);
 
 /**
  * 1 行計測（折り返さない）

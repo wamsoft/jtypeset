@@ -41,6 +41,76 @@ bool canBreakBetween(CharClass before, CharClass after, bool uaxAllowed) {
     return true;
 }
 
+/// 禁則が「弱い」（有限ペナルティにする）クラスか
+bool isWeakLineStart(CharClass c, KinsokuLevel level) {
+    if (level == KinsokuLevel::Strict) return false;
+    switch (c) {
+    case CharClass::SmallKana:
+    case CharClass::Prolonged:
+    case CharClass::Iteration:
+    case CharClass::Hyphen:
+        return true;
+    case CharClass::FullStop:
+    case CharClass::Comma:
+    case CharClass::CloseBracket:
+    case CharClass::MiddleDot:
+    case CharClass::Dividing:
+        return level == KinsokuLevel::Loose;
+    default:
+        return false;
+    }
+}
+
+/// 和欧間・約物を除いた「文字」の和字か（Word 折返しで切らない対象）
+bool isJapaneseLetter(CharClass c) {
+    switch (c) {
+    case CharClass::Ideographic:
+    case CharClass::Hiragana:
+    case CharClass::Katakana:
+    case CharClass::SmallKana:
+    case CharClass::Prolonged:
+    case CharClass::Iteration:
+    case CharClass::Inseparable:
+    case CharClass::Unknown:
+        return true;
+    default:
+        return false;
+    }
+}
+
+/**
+ * 2 クラスタの間で切るときのペナルティ。0 = 切ってよい、kInfinitePenalty = 切らない、その間 = 弱い禁則
+ * @param cpBefore,cpAfter 前後の文字（禁則の追加・除外の照合用）
+ */
+float breakPenaltyBetween(CharClass before, CharClass after, bool uaxAllowed, char32_t cpBefore, char32_t cpAfter,
+                          const SpacingOptions& opts, WrapMode wrap) {
+    if (wrap == WrapMode::None) return kInfinitePenalty;
+    auto listed = [](const std::u16string& list, char32_t cp) {
+        std::u16string one;
+        text::appendCodePoint(one, cp);
+        return !list.empty() && list.find(one) != std::u16string::npos;
+    };
+    // 追加・除外リスト（文字クラスより優先）
+    if (listed(opts.lineEndProhibited, cpBefore)) return kInfinitePenalty;
+    if (listed(opts.lineStartProhibited, cpAfter)) return kInfinitePenalty;
+    const bool endAllowed = listed(opts.lineEndAllowed, cpBefore);
+    const bool startAllowed = listed(opts.lineStartAllowed, cpAfter);
+
+    if (!endAllowed && text::isLineEndProhibited(before)) return kInfinitePenalty;
+    if (!startAllowed && text::isLineStartProhibited(after)) {
+        return isWeakLineStart(after, opts.kinsoku) ? opts.weakKinsokuPenalty : kInfinitePenalty;
+    }
+    if (before == CharClass::Inseparable && after == CharClass::Inseparable) return kInfinitePenalty;
+    if (text::isWestern(before) && text::isWestern(after)) {
+        if (wrap == WrapMode::Char) return 0.0f;
+        return uaxAllowed ? 0.0f : kInfinitePenalty;
+    }
+    if (before == CharClass::PrefixAbbr && text::isWestern(after)) return kInfinitePenalty;
+    if (text::isWestern(before) && after == CharClass::PostfixAbbr) return kInfinitePenalty;
+    if (wrap == WrapMode::Word && isJapaneseLetter(before) && isJapaneseLetter(after)) return kInfinitePenalty;
+    return 0.0f;
+}
+
 /// 詰めた仮想ボディの中でのグリフ位置
 Pt bodyGlyphOffset(CharClass cls, Pt shapedAdvance, Pt bodyWidth) {
     const Pt slack = shapedAdvance - bodyWidth;
@@ -503,6 +573,14 @@ std::vector<LineItem> buildLineItems(const ShapedText& shaped,
         const int parentCount = static_cast<int>(parents.size());
         const Pt em = emOf(parents.front());
         const uint32_t si = shaped.clusters[parents.front()].styleIndex;
+        // 注記と親文字の間隔（Annotation::offset、親の em）: 組んだ注記のグリフを注記側へずらす
+        const Pt annOffset = r.ann->offset * em;
+        const float annSide = annotationSide(ctx.writingMode);
+        auto applyOffset = [&](RubyResult& rr) {
+            if (annOffset == 0.0f || !rr.valid) return;
+            for (PlacedGlyph& g : rr.glyphs) g.block += annSide * annOffset;
+            if (annSide > 0.0f) rr.extentMax += annOffset; else rr.extentMin -= annOffset;
+        };
 
         switch (r.ann->type) {
         case AnnotationType::Ruby: {
@@ -529,6 +607,7 @@ std::vector<LineItem> buildLineItems(const ShapedText& shaped,
                     // 全部が親に収まる: 下のモノルビ経路で 1 字ずつ中付きにする
                 } else if (totalRuby <= parentWidth + 0.01f) {
                     RubyResult rr = layoutJukugoRuby(shapedParts, pw, em, rubySize, si, ctx.writingMode);
+                    applyOffset(rr);
                     if (rr.valid) {
                         const uint32_t head = parents.front();
                         attached[head].insert(attached[head].end(), rr.glyphs.begin(), rr.glyphs.end());
@@ -547,6 +626,7 @@ std::vector<LineItem> buildLineItems(const ShapedText& shaped,
                         canRubyOverhang(shaped.clusters[r.clusterEnd].charClass);
                     RubyResult rr = layoutRuby(joined, ctx, em, rubySize, parentWidth, parentCount,
                                                hangBefore, hangAfter, si);
+                    applyOffset(rr);
                     if (rr.valid) {
                         const uint32_t head = parents.front();
                         attached[head].insert(attached[head].end(), rr.glyphs.begin(), rr.glyphs.end());
@@ -571,6 +651,7 @@ std::vector<LineItem> buildLineItems(const ShapedText& shaped,
                     const uint32_t k = parents[pi];
                     RubyResult rr = layoutRuby(parts[pi], ctx, em, rubySize, bodyWidths[k], 1,
                                                false, false, si);
+                    applyOffset(rr);
                     if (!rr.valid) continue;
                     attached[k].insert(attached[k].end(), rr.glyphs.begin(), rr.glyphs.end());
                     extentMin[k] = std::min(extentMin[k], rr.extentMin);
@@ -587,6 +668,7 @@ std::vector<LineItem> buildLineItems(const ShapedText& shaped,
                     canRubyOverhang(shaped.clusters[r.clusterEnd].charClass);
                 RubyResult rr = layoutRuby(r.ann->text, ctx, em, rubySize, parentWidth,
                                            parentCount, hangBefore, hangAfter, si);
+                applyOffset(rr);
                 if (!rr.valid) break;
                 const uint32_t head = parents.front();
                 attached[head].insert(attached[head].end(), rr.glyphs.begin(), rr.glyphs.end());
@@ -607,9 +689,11 @@ std::vector<LineItem> buildLineItems(const ShapedText& shaped,
             const Pt markSize = em * r.ann->scale;
             const float side = annotationSide(ctx.writingMode) * (r.ann->oppositeSide ? -1.0f : 1.0f);
             for (uint32_t k : parents) {
+                const size_t before = attached[k].size();
                 if (layoutEmphasisMark(r.ann->mark, ctx, em, markSize, bodyWidths[k], si, attached[k], side)) {
-                    if (side > 0.0f) extentMax[k] = std::max(extentMax[k], em * 0.5f + markSize);
-                    else             extentMin[k] = std::min(extentMin[k], -(em * 0.5f + markSize));
+                    for (size_t g = before; g < attached[k].size(); ++g) attached[k][g].block += side * annOffset;
+                    if (side > 0.0f) extentMax[k] = std::max(extentMax[k], em * 0.5f + markSize + annOffset);
+                    else             extentMin[k] = std::min(extentMin[k], -(em * 0.5f + markSize + annOffset));
                 }
             }
             break;
@@ -629,6 +713,8 @@ std::vector<LineItem> buildLineItems(const ShapedText& shaped,
         }
         case AnnotationType::TateChuYoko:
         case AnnotationType::Warichu:
+        case AnnotationType::Indent:
+        case AnnotationType::MoveTo:
             break;
         }
     }
@@ -640,6 +726,54 @@ std::vector<LineItem> buildLineItems(const ShapedText& shaped,
     bool prevProportional = false;
     CharClass prevClass = CharClass::Unknown;
     Pt prevBoxWidth = 0.0f;
+    size_t prevCharBegin = 0;
+    // タブ・MoveTo 用: 段落頭からの自然幅（1 行目に載る前提の位置）
+    Pt naturalPos = 0.0f;
+    auto naturalWidthUntilTab = [&](uint32_t from) {
+        Pt w = 0.0f;
+        for (uint32_t k = from; k < clusterCount; ++k) {
+            if (skipped[k]) continue;
+            const ShapedCluster& c = shaped.clusters[k];
+            if (c.charStart < shaped.sourceText.size() && shaped.sourceText[c.charStart] == u'\t') break;
+            w += (c.charClass == CharClass::Space && composite[k] == kNone && !ctx.preserveSpaces) ? c.advance : bodyWidths[k];
+        }
+        return w;
+    };
+    auto tabStopWidth = [&](Pt pos, uint32_t nextCluster, Pt em) {
+        // 次のタブ位置（無ければ tabWidth × em ごと）。Center / Right / Decimal は続く文字の幅を差し引く
+        const Pt textW = naturalWidthUntilTab(nextCluster);
+        if (ctx.tabStops && !ctx.tabStops->empty()) {
+            for (const TabStop& ts : *ctx.tabStops) {
+                Pt target = ts.position;
+                if (ts.align == TabAlign::Right) target -= textW;
+                else if (ts.align == TabAlign::Center) target -= textW * 0.5f;
+                else if (ts.align == TabAlign::Decimal) {
+                    Pt beforeDot = 0.0f;
+                    for (uint32_t k = nextCluster; k < clusterCount; ++k) {
+                        if (skipped[k]) continue;
+                        const ShapedCluster& c = shaped.clusters[k];
+                        if (c.charStart >= shaped.sourceText.size() || shaped.sourceText[c.charStart] == u'\t') break;
+                        if (text::codePointAt(shaped.sourceText, c.charStart) == ts.decimalChar) break;
+                        beforeDot += bodyWidths[k];
+                    }
+                    target -= beforeDot;
+                }
+                if (ts.position > pos + 0.01f) return std::max(0.0f, target - pos);
+            }
+            return em * 0.5f;    // タブ位置を使い切ったら半角のアキ
+        }
+        const Pt unit = std::max(1, ctx.tabWidth) * em;
+        const Pt next = (std::floor(pos / unit + 1e-4f) + 1.0f) * unit;
+        return next - pos;
+    };
+    // MoveTo 注記（クラスタ番号 → 位置）
+    std::vector<Pt> moveTo(clusterCount, -1.0f);
+    for (const Annotation& a : annotations) {
+        if (a.type != AnnotationType::MoveTo) continue;
+        for (uint32_t k = 0; k < clusterCount; ++k) {
+            if (shaped.clusters[k].charStart == a.start) { moveTo[k] = a.position; break; }
+        }
+    }
     Pt prevEm = baseEm;
     size_t prevCharEnd = 0;
 
@@ -652,11 +786,40 @@ std::vector<LineItem> buildLineItems(const ShapedText& shaped,
         const bool proportional = compIdx == kNone && cluster.styleIndex < ctx.styles->size() &&
                                   (*ctx.styles)[cluster.styleIndex].hasProportionalFeature();
 
+        // タブ: 次のタブストップまでの、描かない箱（空白を保持する段落では先に空白へ展開されている）
+        if (compIdx == kNone && cluster.charStart < shaped.sourceText.size() &&
+            shaped.sourceText[cluster.charStart] == u'\t') {
+            const Pt w = tabStopWidth(naturalPos, ci + 1, em);
+            LineItem tab = LineItem::box(w, ci, cluster.charStart);
+            tab.ownGlyphs = true;      // グリフ無し
+            items.push_back(std::move(tab));
+            naturalPos += w;
+            prevWasBox = false;        // タブの後ろにはアキを入れない（切れ目にもしない）
+            prevClass = CharClass::Space;
+            prevCharEnd = cluster.charEnd;
+            continue;
+        }
+        // MoveTo: この文字を指定位置から始める（手前なら空きの箱を入れる）
+        if (moveTo[ci] >= 0.0f && moveTo[ci] > naturalPos + 0.01f) {
+            const Pt w = moveTo[ci] - naturalPos;
+            LineItem gap = LineItem::box(w, ci, cluster.charStart);
+            gap.ownGlyphs = true;
+            items.push_back(std::move(gap));
+            naturalPos += w;
+            prevWasBox = false;
+            prevClass = CharClass::Space;
+        }
+
         // 欧文間隔は Box ではなく Glue（そこが唯一の欧文の切れ目）。空白を保持する段落では固定幅の箱
         if (cls == CharClass::Space && compIdx == kNone && !ctx.preserveSpaces) {
             const Pt w = cluster.advance;
+            // Glue は前が Box なら常に切れ目になるので、折り返さない指定では手前に無限ペナルティを置く
+            if (ctx.wrap == WrapMode::None && prevWasBox) {
+                items.push_back(LineItem::penaltyItem(kInfinitePenalty, 0.0f, cluster.charStart));
+            }
             items.push_back(LineItem::gluePt(w, w * 0.5f, w / 3.0f, cluster.charStart));
             items.back().level = cluster.level;    // 双方向の並べ替えで空白自身のレベルを使う（L1 の解決済み）
+            naturalPos += w;
             prevWasBox = false;
             prevClass = cls;
             prevCharEnd = cluster.charEnd;
@@ -694,18 +857,27 @@ std::vector<LineItem> buildLineItems(const ShapedText& shaped,
 
             const bool uaxAllowed = prevCharEnd > 0 && prevCharEnd - 1 < uax.size() &&
                                     uax[prevCharEnd - 1] != text::BreakOpportunity::Prohibited;
-            const bool breakable = canBreakBetween(prevClass, spacingClass, uaxAllowed) && !noBreak[ci];
+            const char32_t cpBefore = (prevCharEnd > 0) ? text::codePointAt(shaped.sourceText, prevCharBegin) : 0;
+            const char32_t cpAfter = text::codePointAt(shaped.sourceText, cluster.charStart);
+            float breakPenalty = breakPenaltyBetween(prevClass, spacingClass, uaxAllowed, cpBefore, cpAfter,
+                                                     opts, ctx.wrap);
+            if (noBreak[ci]) breakPenalty = kInfinitePenalty;
+            const bool breakable = breakPenalty < kInfinitePenalty;
 
             // ぶら下げ: 句読点の直後は「幅が負の Penalty」で切る
-            if (breakable && opts.hangingPunctuation && text::isHangable(prevClass)) {
+            if (breakable && breakPenalty <= 0.0f && opts.hangingPunctuation && text::isHangable(prevClass)) {
                 items.push_back(LineItem::penaltyItem(0.0f, -prevBoxWidth, cluster.charStart));
             } else if (!breakable) {
                 items.push_back(LineItem::penaltyItem(kInfinitePenalty, 0.0f, cluster.charStart));
+            } else if (breakPenalty > 0.0f) {
+                items.push_back(LineItem::penaltyItem(breakPenalty, 0.0f, cluster.charStart));   // 弱い禁則
             }
             if (breakable || natural != 0.0f || stretch != 0.0f || shrink != 0.0f) {
                 items.push_back(LineItem::gluePt(natural, stretch, shrink, cluster.charStart));
+                naturalPos += natural;
             }
         }
+        naturalPos += boxWidth;
 
         LineItem box = LineItem::box(boxWidth, ci, cluster.charStart);
         if (compIdx != kNone) {
@@ -725,6 +897,7 @@ std::vector<LineItem> buildLineItems(const ShapedText& shaped,
 
         prevWasBox = true;
         prevProportional = proportional;
+        prevCharBegin = cluster.charStart;
         prevClass = spacingClass;
         prevBoxWidth = boxWidth;
         prevEm = em;

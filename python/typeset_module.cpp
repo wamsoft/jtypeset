@@ -50,6 +50,8 @@ LineInfo lineInfoOf(const inl::LineBox& l) {
 struct ParagraphLayout {
     inl::ParagraphFragment frag;
     WritingMode wm = WritingMode::HorizontalTb;
+    float scale = 1.0f;     ///< fit_paragraph で縮めた倍率
+    bool fits = true;       ///< fit_paragraph が収められたか
 };
 
 /// 文字 1 つの情報（CharBox ＋ 物理矩形 ＋ face のキー）
@@ -157,6 +159,28 @@ Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
         .value("MIXED", TextOrientation::Mixed)
         .value("UPRIGHT", TextOrientation::Upright)
         .value("SIDEWAYS", TextOrientation::Sideways);
+    py::enum_<WrapMode>(m, "WrapMode",
+                        "折返しの方式: MIXED（和文は字ごと・欧文は語ごと）/ CHAR（欧文の語中でも切る）/ "
+                        "WORD（和文も語でだけ切る）/ NONE（折り返さない）")
+        .value("MIXED", WrapMode::Mixed)
+        .value("CHAR", WrapMode::Char)
+        .value("WORD", WrapMode::Word)
+        .value("NONE", WrapMode::None);
+    py::enum_<KinsokuLevel>(m, "KinsokuLevel",
+                            "禁則の強さ: STRICT（JLReq のまま）/ NORMAL（小書きの仮名・長音・繰返し記号・ハイフン類を弱い禁則に）/ "
+                            "LOOSE（句読点・終わり括弧・中点・区切り約物も弱い禁則に）")
+        .value("STRICT", KinsokuLevel::Strict)
+        .value("NORMAL", KinsokuLevel::Normal)
+        .value("LOOSE", KinsokuLevel::Loose);
+    py::enum_<BlockAlign>(m, "BlockAlign", "行送り方向の揃え（箱の中での段落の位置）")
+        .value("START", BlockAlign::Start)
+        .value("CENTER", BlockAlign::Center)
+        .value("END", BlockAlign::End);
+    py::enum_<TabAlign>(m, "TabAlign", "タブストップの揃え")
+        .value("LEFT", TabAlign::Left)
+        .value("CENTER", TabAlign::Center)
+        .value("RIGHT", TabAlign::Right)
+        .value("DECIMAL", TabAlign::Decimal);
     py::enum_<Direction>(m, "Direction", "段落の基底方向（AUTO は最初の強い文字で決める）")
         .value("AUTO", Direction::Auto)
         .value("LTR", Direction::Ltr)
@@ -282,16 +306,32 @@ Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
                        "OpenType feature（['palt', '-liga', 'ss01'] など HarfBuzz の書式）。palt 等の字幅を変える feature を付けた文字は JLReq の約物の詰めを使わない")
         .def("copy", [](const TextStyle& s) { return TextStyle(s); });
 
+    py::class_<TabStop>(m, "TabStop", "タブストップ（行頭からの位置 pt・揃え・小数点揃えの文字）")
+        .def(py::init<>())
+        .def(py::init([](Pt position, TabAlign align, char32_t decimalChar) {
+                 TabStop t; t.position = position; t.align = align; t.decimalChar = decimalChar; return t;
+             }),
+             py::arg("position"), py::arg("align") = TabAlign::Left, py::arg("decimal_char") = U'.')
+        .def_readwrite("position", &TabStop::position)
+        .def_readwrite("align", &TabStop::align)
+        .def_readwrite("decimal_char", &TabStop::decimalChar);
     py::class_<SpacingOptions>(m, "SpacingOptions", "約物の詰め・ぶら下げ・和欧間・和字間の伸縮（JLReq のアキ量表）")
         .def(py::init<>())
         .def_readwrite("punctuation_spacing", &SpacingOptions::punctuationSpacing)
         .def_readwrite("hanging_punctuation", &SpacingOptions::hangingPunctuation)
         .def_readwrite("latin_gap", &SpacingOptions::latinGap)
         .def_readwrite("kanji_skip_stretch", &SpacingOptions::kanjiSkipStretch)
-        .def_readwrite("kanji_skip_shrink", &SpacingOptions::kanjiSkipShrink);
+        .def_readwrite("kanji_skip_shrink", &SpacingOptions::kanjiSkipShrink)
+        .def_readwrite("kinsoku", &SpacingOptions::kinsoku, "禁則の強さ（KinsokuLevel）")
+        .def_readwrite("weak_kinsoku_penalty", &SpacingOptions::weakKinsokuPenalty, "弱い禁則のペナルティ")
+        .def_readwrite("line_start_prohibited", &SpacingOptions::lineStartProhibited, "行頭に置かない文字を足す")
+        .def_readwrite("line_start_allowed", &SpacingOptions::lineStartAllowed, "行頭禁則から外す文字")
+        .def_readwrite("line_end_prohibited", &SpacingOptions::lineEndProhibited, "行末に置かない文字を足す")
+        .def_readwrite("line_end_allowed", &SpacingOptions::lineEndAllowed, "行末禁則から外す文字");
     py::class_<BreakOptions>(m, "BreakOptions", "行分割の方法（Greedy / Knuth–Plass）と両端揃え")
         .def(py::init<>())
         .def_readwrite("strategy", &BreakOptions::strategy)
+        .def_readwrite("wrap", &BreakOptions::wrap, "折返しの方式（WrapMode）")
         .def_readwrite("justify", &BreakOptions::justify)
         .def_readwrite("tolerance", &BreakOptions::tolerance)
         .def_readwrite("line_penalty", &BreakOptions::linePenalty);
@@ -300,6 +340,10 @@ Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
         .def_readwrite("align", &ParagraphStyle::align)
         .def_readwrite("direction", &ParagraphStyle::direction, "基底方向（Direction）。RTL では Start / End が入れ替わる")
         .def_readwrite("first_line_indent", &ParagraphStyle::firstLineIndent)
+        .def_readwrite("hanging_indent", &ParagraphStyle::hangingIndent, "2 行目以降の字下げ（em）")
+        .def_readwrite("ellipsis", &ParagraphStyle::ellipsis, "行数上限で切れたときに末尾へ置く省略記号（\"…\"）")
+        .def_readwrite("tab_stops", &ParagraphStyle::tabStops,
+                       "タブストップ（TabStop のリスト）。空なら tab_width × em ごと。リストはコピーを返すので作って代入する")
         .def_readwrite("line_pitch", &ParagraphStyle::linePitch)
         .def_readwrite("line_height", &ParagraphStyle::lineHeight)
         .def_readwrite("orientation", &ParagraphStyle::orientation)
@@ -331,6 +375,11 @@ Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
         .def_static("emphasis", &inl::Annotation::emphasis, py::arg("start"), py::arg("end"),
                     py::arg("mark") = inl::EmphasisMark::Sesame, py::arg("scale") = 0.5f,
                     py::arg("opposite_side") = false)
+        .def_static("indent", &inl::Annotation::indent, py::arg("start"), py::arg("end"), py::arg("indent_em"),
+                    "途中からの字下げ: 行頭が [start, end) にある行を indent_em 下げる")
+        .def_static("move_to", &inl::Annotation::moveTo, py::arg("start"), py::arg("position"),
+                    "行内の絶対位置: start の文字を行頭から position（pt）から始める")
+        .def_readwrite("offset", &inl::Annotation::offset, "ルビ・圏点と親文字の間隔（親文字の em）")
         .def_static("warichu", &inl::Annotation::warichu, py::arg("start"), py::arg("end"),
                     py::arg("text") = std::u16string(), py::arg("scale") = 0.5f)
         .def_static("jidori", &inl::Annotation::jidori, py::arg("start"), py::arg("end"), py::arg("em"));
@@ -940,6 +989,16 @@ Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
              py::arg("path"), py::arg("size"), py::arg("origin"), py::arg("dpi") = 144.0f,
              py::arg("background") = Color{255, 255, 255, 255}, py::arg("line_offset") = 0,
              py::arg("max_chars") = static_cast<size_t>(-1))
+        .def("origin_in_box",
+             [](const ParagraphLayout& pl, const Rect& box, BlockAlign blockAlign, Align align) {
+                 return inl::originInBox(pl.frag, pl.wm, box, blockAlign, align);
+             },
+             py::arg("box"), py::arg("block_align") = BlockAlign::Start, py::arg("align") = Align::Start,
+             "箱の中で天地（block_align）・左右（align）に揃えた origin を返す")
+        .def_property_readonly("scale", [](const ParagraphLayout& pl) { return pl.scale; },
+                               "fit_paragraph で縮めた倍率（1.0 なら縮めていない）")
+        .def_property_readonly("fits", [](const ParagraphLayout& pl) { return pl.fits; },
+                               "fit_paragraph が行数上限に収められたか")
         .def("__repr__", [](const ParagraphLayout& pl) {
             return "ParagraphLayout(lines=" + std::to_string(pl.frag.lines.size()) + ")";
         });
@@ -967,6 +1026,32 @@ Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
           py::arg("fonts"), py::arg("paragraph"), py::arg("writing_mode"),
           py::arg("line_lengths") = std::vector<Pt>{}, py::arg("default_length") = 200.0f,
           "段落を組んで ParagraphLayout（行ごとの文字範囲と長さ＋取り出し口）を返す（行長は行ごとに指定できる = \\parshape）");
+    m.def("fit_paragraph",
+          [](font::FontSet& fonts, const inl::Paragraph& para, WritingMode wm, int maxLines,
+             std::vector<Pt> lineLengths, Pt defaultLength, float minScale, float step) {
+              struct Shape : inl::LineShapeProvider {
+                  std::vector<Pt> lens;
+                  Pt def;
+                  inl::LineShape at(int i) const override {
+                      const Pt L = (i >= 0 && static_cast<size_t>(i) < lens.size()) ? lens[i] : def;
+                      return inl::LineShape{L, 0.0f};
+                  }
+              } shape;
+              shape.lens = std::move(lineLengths);
+              shape.def = defaultLength;
+              inl::ParagraphLayouter layouter(fonts);
+              const inl::FitResult r = inl::fitParagraph(layouter, para, wm, shape, maxLines, minScale, step);
+              ParagraphLayout pl;
+              pl.frag = r.fragment;
+              pl.wm = wm;
+              pl.scale = r.scale;
+              pl.fits = r.fits;
+              return pl;
+          },
+          py::arg("fonts"), py::arg("paragraph"), py::arg("writing_mode"), py::arg("max_lines"),
+          py::arg("line_lengths") = std::vector<Pt>{}, py::arg("default_length") = 200.0f,
+          py::arg("min_scale") = 0.5f, py::arg("step") = 0.05f,
+          "行数上限に収まるまで文字サイズを段階的に縮めて組む（吹き出しのフィット）。ParagraphLayout の scale / fits を見る");
     m.def("measure_text",
           [](font::FontSet& fonts, const std::u16string& text, const TextStyle& style, WritingMode wm) {
               return inl::measureText(fonts, text, style, wm);

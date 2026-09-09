@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 #include "typeset/inl/item_builder.hpp"
 #include "typeset/inl/shaper.hpp"
@@ -81,6 +82,36 @@ void reorderBidi(LineBox& line, std::vector<Piece>& pieces, int paragraphLevel) 
         v += p.width;
     }
 }
+
+/**
+ * 段落の字下げ: 段落の 1 行目は firstIndent、それ以降は hangingIndent。Indent 注記による行ごとの上書き
+ * （lineIndents: 行番号 → 字下げ pt。負なら上書き無し）
+ */
+class ParagraphIndentShape : public LineShapeProvider {
+public:
+    ParagraphIndentShape(const LineShapeProvider& base, int firstLine, Pt firstIndent, Pt hangingIndent,
+                         const std::vector<Pt>& lineIndents)
+        : base_(base), firstLine_(firstLine), first_(firstIndent), hanging_(hangingIndent), lineIndents_(lineIndents) {}
+    LineShape at(int lineIndex) const override { return at(lineIndex, 0.0f); }
+    LineShape at(int lineIndex, Pt extraBlock) const override {
+        LineShape s = base_.at(lineIndex, extraBlock);
+        Pt indent = (lineIndex == firstLine_) ? first_ : hanging_;
+        if (lineIndex >= 0 && static_cast<size_t>(lineIndex) < lineIndents_.size() && lineIndents_[lineIndex] >= 0.0f) {
+            indent = lineIndents_[lineIndex] + (lineIndex == firstLine_ ? first_ : 0.0f);
+        }
+        if (indent != 0.0f) {
+            s.length -= indent;
+            s.indent += indent;
+        }
+        return s;
+    }
+private:
+    const LineShapeProvider& base_;
+    int firstLine_;
+    Pt first_;
+    Pt hanging_;
+    const std::vector<Pt>& lineIndents_;
+};
 
 } // namespace
 
@@ -185,6 +216,44 @@ Paragraph expandTabs(const Paragraph& para) {
 
 } // namespace
 
+/**
+ * 省略記号: 行数上限で切れた最後の行の末尾を落として「…」を置く（組み直さず、行のグリフを削る）。
+ * 双方向の行では末尾＝送り方向の終端とみなす
+ */
+void ParagraphLayouter::applyEllipsis(ParagraphFragment& frag, const Paragraph& para, WritingMode wm,
+                                      const LineShapeProvider& shape) {
+    LineBox& line = frag.lines.back();
+    const uint32_t lastStyle = line.glyphs.empty() ? 0u : line.glyphs.back().styleIndex;
+    const TextStyle& st = lastStyle < frag.styles.size() ? frag.styles[lastStyle] : frag.styles.front();
+    const ShapedText ell = shapeText(para.style.ellipsis, st, fonts_, wm, para.style.orientation);
+    if (ell.glyphs.empty()) return;
+    const Pt avail = shape.at(line.lineIndex).length - line.indent;
+    // 本文の文字（注記以外）を後ろから落として、省略記号が入る所を探す
+    auto endOf = [&]() {
+        Pt e = 0.0f;
+        for (const PlacedGlyph& g : line.glyphs) if (!g.annotation) e = std::max(e, g.inline_ + g.boxAfter);
+        return e;
+    };
+    while (!line.glyphs.empty() && endOf() + ell.advance > avail + 0.01f) {
+        uint32_t maxChar = 0;
+        for (const PlacedGlyph& g : line.glyphs) maxChar = std::max(maxChar, g.charIndex);
+        // maxChar の文字（とその注記）を落とす
+        line.glyphs.erase(std::remove_if(line.glyphs.begin(), line.glyphs.end(),
+                                         [&](const PlacedGlyph& g) { return g.charIndex == maxChar; }),
+                          line.glyphs.end());
+        line.charEnd = maxChar;
+    }
+    const Pt at = endOf();
+    for (PlacedGlyph g : ell.glyphs) {
+        g.inline_ += at;
+        g.charIndex = std::numeric_limits<uint32_t>::max();   // 元テキストに無い
+        g.styleIndex = lastStyle;
+        line.glyphs.push_back(std::move(g));
+    }
+    line.naturalLength = at + ell.advance;
+    line.length = line.naturalLength;
+}
+
 ParagraphFragment ParagraphLayouter::layout(const Paragraph& paraIn, WritingMode wm,
                                             const LineShapeProvider& shape,
                                             size_t charStart, int maxLines,
@@ -194,9 +263,29 @@ ParagraphFragment ParagraphLayouter::layout(const Paragraph& paraIn, WritingMode
     // 排除領域（回り込み）を見る LineShapeProvider にそのずれを渡して組み直す（不動点まで、最大 3 回）
     std::vector<Pt> offsets;
     ParagraphFragment frag;
-    for (int iter = 0; iter < 3; ++iter) {
+    // 途中からの字下げ（Indent 注記）: 行頭の文字が決まらないと字下げが決まらないので、組んでから行ごとの字下げを
+    // 埋めて組み直す（不動点まで、最大 4 回）
+    std::vector<const Annotation*> indents;
+    for (const Annotation& a : para.annotations) if (a.type == AnnotationType::Indent) indents.push_back(&a);
+    lineIndents_.clear();
+    const Pt baseEm = para.baseStyle().size;
+    for (int iter = 0; iter < 3 + (indents.empty() ? 0 : 4); ++iter) {
         const OffsetLineShape shifted(shape, offsets, firstLineIndex);
         frag = layoutOnce(para, wm, shifted, charStart, maxLines, firstLineIndex);
+        bool indentChanged = false;
+        if (!indents.empty()) {
+            std::vector<Pt> want(frag.lines.size() + static_cast<size_t>(std::max(0, firstLineIndex)), -1.0f);
+            for (size_t i = 0; i < frag.lines.size(); ++i) {
+                const size_t li = i + static_cast<size_t>(std::max(0, firstLineIndex));
+                for (const Annotation* a : indents) {
+                    if (frag.lines[i].charStart >= a->start && frag.lines[i].charStart < a->end) want[li] = a->indentEm * baseEm;
+                }
+            }
+            if (want != lineIndents_) {
+                lineIndents_ = std::move(want);
+                indentChanged = true;
+            }
+        }
         std::vector<Pt> next(frag.lines.size(), 0.0f);
         Pt acc = 0.0f;
         bool any = false;
@@ -205,10 +294,12 @@ ParagraphFragment ParagraphLayouter::layout(const Paragraph& paraIn, WritingMode
             acc += frag.lines[i].extraBefore + frag.lines[i].extraAfter;
             if (next[i] != 0.0f) any = true;
         }
+        if (indentChanged) { offsets = std::move(next); continue; }
         if (!any && offsets.empty()) break;
         if (next == offsets) break;
         offsets = std::move(next);
     }
+    if (!frag.complete && !para.style.ellipsis.empty() && !frag.lines.empty()) applyEllipsis(frag, para, wm, shape);
     return frag;
 }
 
@@ -317,12 +408,16 @@ ParagraphFragment ParagraphLayouter::layoutOnce(const Paragraph& para, WritingMo
             const ShapedText shaped = shapeText(sub, runs, sctx);
 
             ItemBuildContext ictx{fonts_, wm, para.style.orientation, &frag.styles, &base,
-                                  base.letterSpacing, para.style.preserveSpaces};
+                                  base.letterSpacing, para.style.preserveSpaces, bo.wrap,
+                                  &para.style.tabStops, para.style.tabWidth};
             const std::vector<LineItem> items =
                 buildLineItems(shaped, anns, para.style.spacing, ictx);
 
             const Pt indentPt = paraHead ? para.style.firstLineIndent * baseSize : 0.0f;
-            const IndentedLineShape ishape(shape, lineIndex, indentPt);
+            // 1 行目は一字下げ、2 行目以降はぶら下げインデント、途中からの字下げ（Indent 注記）は行頭の文字で決まる
+            // （lineIndents_ は layout() の反復で埋める）
+            const ParagraphIndentShape ishape(shape, lineIndex, indentPt, para.style.hangingIndent * baseSize,
+                                              lineIndents_);
             const std::vector<BreakLine> breaks = breakLines(items, ishape, bo, lineIndex);
 
             for (size_t bi = 0; bi < breaks.size(); ++bi) {

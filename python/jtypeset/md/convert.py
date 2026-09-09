@@ -72,6 +72,9 @@ class Options:
     landscape: bool = False
     writing: str = "horizontal"       # horizontal / vertical
     direction: str = "auto"           # auto / ltr / rtl（段落の基底方向。行内の双方向は常に UAX #9）
+    wrap: str = "mixed"               # mixed / char / word / none（折返しの方式）
+    kinsoku: str = "strict"           # strict / normal / loose（禁則の強さ）
+    ruby_offset: float = 0.0          # ルビと親文字の間隔（親文字の em）
     columns: int = 1
     column_gap: float = 0.0           # pt（0 = 既定）
     margin: Any = None                # mm。数値、または {top, bottom, inner, outer}
@@ -262,18 +265,36 @@ class Converter:
             st.font.weight = 600
             self.head_styles[level] = st
         direction = {"ltr": ts.Direction.LTR, "rtl": ts.Direction.RTL}.get(str(o.direction).lower(), ts.Direction.AUTO)
+        wrap = {"char": ts.WrapMode.CHAR, "word": ts.WrapMode.WORD, "none": ts.WrapMode.NONE}.get(
+            str(o.wrap).lower(), ts.WrapMode.MIXED)
+        kinsoku = {"normal": ts.KinsokuLevel.NORMAL, "loose": ts.KinsokuLevel.LOOSE}.get(
+            str(o.kinsoku).lower(), ts.KinsokuLevel.STRICT)
+
+        def tune(ps: "ts.ParagraphStyle") -> "ts.ParagraphStyle":
+            ps.direction = direction
+            if wrap != ts.WrapMode.MIXED:
+                bo = ps.line_break
+                bo.wrap = wrap
+                ps.line_break = bo
+            if kinsoku != ts.KinsokuLevel.STRICT:
+                sp = ps.spacing
+                sp.kinsoku = kinsoku
+                ps.spacing = sp
+            return ps
+
+        self.tune_pstyle = tune
         self.pstyle = ts.ParagraphStyle()
         self.pstyle.line_height = o.line_height
         self.pstyle.first_line_indent = 1.0 if o.indent else 0.0   # em
-        self.pstyle.direction = direction
+        tune(self.pstyle)
         if not o.justify:
             self.pstyle.align = ts.Align.START
         self.plain_pstyle = ts.ParagraphStyle()
         self.plain_pstyle.line_height = o.line_height
         self.plain_pstyle.first_line_indent = 0.0
-        self.plain_pstyle.direction = direction
+        tune(self.plain_pstyle)
         self.head_pstyle = ts.ParagraphStyle()
-        self.head_pstyle.direction = direction
+        tune(self.head_pstyle)
         self.head_pstyle.align = ts.Align.START
         self.head_pstyle.line_height = 1.4
         self.head_pstyle.first_line_indent = 0.0
@@ -813,7 +834,10 @@ class Converter:
                 ruby = m.group(2) or m.group(4) or m.group(6)
                 start = state["pos"]
                 emit(base_text)
-                p.annotate(ts.Annotation.ruby(start, state["pos"], ruby))
+                ann = ts.Annotation.ruby(start, state["pos"], ruby)
+                if self.opts.ruby_offset:
+                    ann.offset = float(self.opts.ruby_offset)
+                p.annotate(ann)
                 pos = m.end()
             emit(text[pos:])
 

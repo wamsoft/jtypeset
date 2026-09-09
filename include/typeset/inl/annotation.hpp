@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <string>
 
+#include "typeset/geom.hpp"
+
 /**
  * inl/annotation — 行内に組み込む注記
  *
@@ -23,6 +25,8 @@ enum class AnnotationType : uint8_t {
     Emphasis,       ///< 圏点（縦組みでは親文字の右、横組みでは上）
     Warichu,        ///< 割注（行内に 2 行の子ブロックを組む）
     Jidori,         ///< 字取り（指定 em 数へ均等割り付け）
+    Indent,         ///< 途中からの字下げ: 行頭が [start, end) にある行を indentEm だけ下げる（KAG3 [indent]）
+    MoveTo,         ///< 行内の絶対位置: start の文字を行頭から position（pt）の位置から始める（KAG3 [locate]）
 };
 
 enum class RubyMode : uint8_t {
@@ -54,6 +58,28 @@ struct Annotation {
     EmphasisMark mark = EmphasisMark::Sesame;
     bool oppositeSide = false;      ///< 圏点を注記側の反対（縦組み: 左、横組み: 下）に付ける
     float jidoriEm = 0.0f;          ///< 字取りの長さ（em）
+    float offset = 0.0f;            ///< ルビ・圏点と親文字の間隔（親文字の em）。既定はベタ付け
+    float indentEm = 0.0f;          ///< Indent の字下げ（em）
+    Pt position = 0.0f;             ///< MoveTo の位置（pt）
+
+    /// 途中からの字下げ。行頭が [start, end) にある行を indentEm 下げる（end は npos で段落末まで）
+    static Annotation indent(size_t start, size_t end, float indentEm) {
+        Annotation a;
+        a.type = AnnotationType::Indent;
+        a.start = start;
+        a.end = end;
+        a.indentEm = indentEm;
+        return a;
+    }
+    /// 行内の絶対位置。start の文字を行頭から position（pt）から始める（手前なら空きを入れ、既に超えていれば何もしない）
+    static Annotation moveTo(size_t start, Pt position) {
+        Annotation a;
+        a.type = AnnotationType::MoveTo;
+        a.start = start;
+        a.end = start + 1;
+        a.position = position;
+        return a;
+    }
 
     static Annotation ruby(size_t start, size_t end, std::u16string text,
                            RubyMode mode = RubyMode::Group, float scale = 0.5f) {

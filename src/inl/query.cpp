@@ -221,6 +221,55 @@ std::optional<Rect> caretRect(const ParagraphFragment& frag, WritingMode wm, Poi
     return std::nullopt;
 }
 
+Point originInBox(const ParagraphFragment& frag, WritingMode wm, const Rect& box,
+                  BlockAlign blockAlign, Align align) {
+    const Pt extent = frag.blockExtent();
+    const Pt boxBlock = isVertical(wm) ? box.w : box.h;
+    Pt blockOff = 0.0f;
+    if (blockAlign == BlockAlign::Center) blockOff = (boxBlock - extent) * 0.5f;
+    else if (blockAlign == BlockAlign::End) blockOff = boxBlock - extent;
+    // 行の方向: 段落は箱の行長で組んである前提（Start）。End / Center は最長の行で寄せる
+    Pt inlineOff = 0.0f;
+    if (align == Align::End || align == Align::Center) {
+        Pt longest = 0.0f;
+        for (const LineBox& l : frag.lines) longest = std::max(longest, l.indent + l.length);
+        const Pt boxInline = isVertical(wm) ? box.h : box.w;
+        inlineOff = (align == Align::End) ? boxInline - longest : (boxInline - longest) * 0.5f;
+    }
+    // origin は 1 行目の中心線: 箱の始端＋ blockOff ＋ pitch/2 ＋ extraBefore
+    const Pt first = blockOff + frag.linePitch * 0.5f;
+    switch (wm) {
+    case WritingMode::HorizontalTb: return Point{box.x + inlineOff, box.y + first};
+    case WritingMode::VerticalRl:   return Point{box.right() - first, box.y + inlineOff};
+    case WritingMode::VerticalLr:   return Point{box.x + first, box.y + inlineOff};
+    }
+    return Point{box.x, box.y};
+}
+
+FitResult fitParagraph(ParagraphLayouter& layouter, const Paragraph& para, WritingMode wm,
+                       const LineShapeProvider& shape, int maxLines, float minScale, float step) {
+    FitResult out;
+    out.fragment = layouter.layout(para, wm, shape, 0, maxLines);
+    if (out.fragment.complete || maxLines < 0 || step <= 0.0f) return out;
+    for (float s = 1.0f - step; s >= minScale - 1e-4f; s -= step) {
+        Paragraph scaled = para;
+        for (InlineRun& r : scaled.runs) {
+            r.style.size = r.style.size * s;
+            if (r.image || r.placeholder) { r.imageSize.w *= s; r.imageSize.h *= s; }
+        }
+        if (scaled.style.linePitch > 0.0f) scaled.style.linePitch *= s;
+        for (Annotation& a : scaled.annotations) {
+            if (a.type == AnnotationType::MoveTo) a.position *= s;
+        }
+        for (TabStop& ts : scaled.style.tabStops) ts.position *= s;
+        out.fragment = layouter.layout(scaled, wm, shape, 0, maxLines);
+        out.scale = s;
+        if (out.fragment.complete) return out;
+    }
+    out.fits = false;
+    return out;
+}
+
 TextMetrics measureText(font::FontSet& fonts, const std::u16string& text, const TextStyle& style,
                         WritingMode wm, TextOrientation orientation) {
     const ShapedText shaped = shapeText(text, style, fonts, wm, orientation);

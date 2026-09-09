@@ -155,9 +155,26 @@ struct TextStyle {
 /**
  * 約物の詰め・和欧間・ぶら下げ
  */
+/**
+ * 禁則の強さ（CSS の line-break 相当）
+ *  - Strict: JLReq 附属書 A のまま（小書きの仮名・長音・繰返し記号・ハイフン類も行頭に置かない）
+ *  - Normal: 小書きの仮名・長音・繰返し記号・ハイフン類は「弱い禁則」（有限のペナルティ。他に切れる所が無ければ行頭に来る）
+ *  - Loose: さらに句読点・終わり括弧・中点・区切り約物も弱い禁則にする（狭い段用）
+ */
+enum class KinsokuLevel : uint8_t { Strict, Normal, Loose };
+
 struct SpacingOptions {
     /// 約物の詰め（JLReq のアキ量表を適用する）。false ならベタ組み
     bool punctuationSpacing = true;
+    /// 禁則の強さ
+    KinsokuLevel kinsoku = KinsokuLevel::Strict;
+    /// 弱い禁則のペナルティ（Knuth–Plass の demerits に効く。Greedy では「切れる」扱い）
+    float weakKinsokuPenalty = 500.0f;
+    /// 禁則の追加・除外（KAG3 の wwFollowing / wwLeading 相当）。文字クラスより優先する
+    std::u16string lineStartProhibited;     ///< 行頭に置かない文字を足す
+    std::u16string lineStartAllowed;        ///< 行頭禁則から外す文字
+    std::u16string lineEndProhibited;       ///< 行末に置かない文字を足す
+    std::u16string lineEndAllowed;          ///< 行末禁則から外す文字
     /// 行末に来た句読点を版面外へ出す
     bool hangingPunctuation = false;
     /// 和欧間のアキを入れる
@@ -174,8 +191,18 @@ enum class LineBreakStrategy : uint8_t {
     KnuthPlass,   ///< 段落全体でデメリットを最小化。組版品質が要る用途向け
 };
 
+/**
+ * 折返しの方式
+ *  - Mixed: 和文は字ごと、欧文は語（UAX #14）で切る（既定）
+ *  - Char: 欧文の語の途中でも切る（CSS word-break: break-all）
+ *  - Word: 和文も語（UAX #14 の機会があり、かつ和字同士でない所）でだけ切る（CSS word-break: keep-all）
+ *  - None: 折り返さない（改行以外で切らない。行長を超えてはみ出す）
+ */
+enum class WrapMode : uint8_t { Mixed, Char, Word, None };
+
 struct BreakOptions {
     LineBreakStrategy strategy = LineBreakStrategy::Greedy;
+    WrapMode wrap = WrapMode::Mixed;
     /// 行末を揃える（グルーを伸縮させる）。false なら自然幅のまま
     bool justify = true;
     /// Knuth–Plass が許容するグルーの伸び率上限
@@ -185,6 +212,17 @@ struct BreakOptions {
 };
 
 enum class Align : uint8_t { Start, End, Center, Justify };
+
+/// 行送り方向の揃え（箱の中での段落の位置。inl::originInBox）
+enum class BlockAlign : uint8_t { Start, Center, End };
+
+/// タブストップの揃え
+enum class TabAlign : uint8_t { Left, Center, Right, Decimal };
+struct TabStop {
+    Pt position = 0.0f;             ///< 行頭からの位置（pt。一字下げは含まない）
+    TabAlign align = TabAlign::Left;
+    char32_t decimalChar = U'.';    ///< Decimal のときに揃える文字
+};
 
 /// 段落の基底方向（UAX #9）。Auto は最初の強い文字で決める（和文・欧文は LTR）
 enum class Direction : uint8_t { Auto, Ltr, Rtl };
@@ -201,6 +239,14 @@ struct ParagraphStyle {
 
     /// 一字下げ（em 単位。日本語段落の既定は 1）
     float firstLineIndent = 0.0f;
+    /// ぶら下げインデント: 2 行目以降の字下げ（em）。途中からの字下げは Annotation::indent
+    float hangingIndent = 0.0f;
+
+    /// 行数上限（ParagraphLayouter::layout の maxLines）で切れたとき、最後の行の末尾に置く省略記号（空なら置かない）
+    std::u16string ellipsis;
+
+    /// タブストップ（行頭からの位置、pt）。空なら tabWidth × em ごとの左揃えタブ。preserveSpaces のときは使わず空白に展開する
+    std::vector<TabStop> tabStops;
 
     /// 行送り（pt）。0 なら size × lineHeight
     Pt linePitch = 0.0f;

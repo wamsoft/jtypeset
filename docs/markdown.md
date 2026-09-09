@@ -83,6 +83,9 @@ paper: A4                 # A4 / A5 / B5 / B6 / 文庫 / 新書 / "148x210mm"
 landscape: false
 writing: horizontal       # horizontal / vertical
 direction: auto           # auto / ltr / rtl（段落の基底方向。行内のアラビア文字・ヘブライ文字は常に双方向で並ぶ）
+wrap: mixed               # mixed / char / word / none（折返し: 既定は和文が字ごと・欧文が語ごと）
+kinsoku: strict           # strict / normal / loose（禁則の強さ。狭い段では normal / loose で行末が揃いやすい）
+ruby-offset: 0            # ルビと親文字の間隔（親文字の em）
 columns: 1
 margin: 20                # mm。{top: 25, bottom: 20, inner: 22, outer: 18} も可
 fonts:                    # フォントファイル（相対パスは Markdown の場所から）

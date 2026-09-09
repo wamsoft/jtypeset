@@ -50,7 +50,9 @@ pages[0].save_svg("out_p1.svg")
 | `Paragraph` | run の列＋注記。`add_run(text, style, literal=False)`、`add_image`、`add_object`（外部オブジェクト）、`add_placeholder(size, style, id)`（描かない空箱。位置は組んだあと取る）、`add_footnote`、`annotate` |
 | `ParagraphLayout` | `layout_paragraph()` の結果。行の列（`lines` / 添字アクセス）に加え、`char_boxes(line, origin)`（文字ごとの位置・スタイル・グリフ）、`rects_for(start, end, origin)`（文字範囲 → 矩形）、`placeholder_rects(origin)`、`hit_test(point, origin)`、`caret_rect(index, origin)`、`save_png(path, size, origin, dpi, max_chars)`（段階表示は `max_chars`） |
 | `measure_text(fonts, text, style, writing_mode)` | 折り返さない 1 行の送り・張り出し・クラスタ数 |
-| `Annotation` | `ruby(start, end, text, mode, scale)`、`tate_chu_yoko`、`emphasis(..., opposite_side)`、`warichu`、`jidori` |
+| `fit_paragraph(fonts, para, wm, max_lines, ...)` | 行数上限に収まるまで文字サイズを縮めて組む（吹き出しのフィット）。結果の `scale` / `fits` を見る |
+| `WrapMode` / `KinsokuLevel` / `TabStop` / `BlockAlign` | 折返しの方式・禁則の強さ・タブストップ・行送り方向の揃え |
+| `Annotation` | `ruby(start, end, text, mode, scale)`、`tate_chu_yoko`、`emphasis(..., opposite_side)`、`warichu`、`jidori`、`indent(start, end, em)`（途中からの字下げ）、`move_to(start, position)`（行内の絶対位置）。`offset` でルビ・圏点と親文字の間隔 |
 | `Flow` と各 Block | `add_paragraph` / `add_heading(p, level, style, numbered)` / `add_list(ListBlock)` / `add_table(TableBlock)` / `add_image(ImageBlock)` / `add_object(ObjectBlock)` / `add_toc(TocBlock)` / `add_index(IndexBlock)` / `add_rule` / `add_page_break` / `add_column_break` / `add_section(columns)` |
 | `BlockStyle` | 前後アキ、orphans / widows、keep_with_next、keep_together、break_before / after、span_columns、label（相互参照）、background / padding |
 | `PageSequence` / `PageMaster` | 判型（`ts.paper.A4` … `ts.paper.landscape(size)`）、余白、段数、書字方向、`header` / `footer`（`RunningText`）、duplex |
@@ -131,6 +133,7 @@ pages, warnings = convert_file("report.md", "report.pdf", Options(), png_dpi=0,
 | `paper` `landscape` | A4 / A5 / B5 / B6 / 文庫 / 新書 / `148x210mm` | A4 |
 | `writing` | horizontal / vertical | horizontal |
 | `direction` | auto / ltr / rtl（段落の基底方向） | auto |
+| `wrap` `kinsoku` `ruby-offset` | 折返しの方式 / 禁則の強さ / ルビと親文字の間隔（em） | mixed / strict / 0 |
 | `columns` `column-gap` | 段数と段間（pt） | 1 |
 | `margin` | mm。数値または `{top, bottom, inner, outer}` | 20（A5 等は 16） |
 | `fonts` | フォントファイルの列（`{path, key, index, family, weight, italic, languages}` も可。family 等を書いたものは初回使用時に開く）。無ければ `data/` の Noto → OS のフォント | |
