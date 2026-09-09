@@ -1,6 +1,8 @@
 #ifndef TYPESET_TEXT_HYPHENATION_HPP
 #define TYPESET_TEXT_HYPHENATION_HPP
 
+#include <cstddef>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <string>
