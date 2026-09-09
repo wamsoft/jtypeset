@@ -51,7 +51,7 @@ pages[0].save_svg("out_p1.svg")
 | `TextShadow` / `TextLayer` / `TextDecoration` | 影（色・ずらし・ぼかし）／外観の 1 層（塗り・縁取り・ずらし・ぼかし。`layers` に下から上の順）／下線・打消し線（色・太さ・位置の補正） |
 | `Paragraph` | run の列＋注記。`add_run(text, style, literal=False)`、`add_image`、`add_object`（外部オブジェクト）、`add_placeholder(size, style, id)`（描かない空箱。位置は組んだあと取る）、`add_footnote`、`annotate` |
 | `ParagraphLayout` | `layout_paragraph()` の結果。行の列（`lines` / 添字アクセス / `len()`）に加え、`char_boxes(line, origin)`（文字ごとの位置・スタイル・グリフ）、`rects_for(start, end, origin)`（文字範囲 → 矩形）、`placeholder_rects(origin)`、`hit_test(point, origin)`、`caret_rect(index, origin)`、`line_origin(line, origin)`、`origin_in_box(box, block_align, align)`、`render` / `save_png(path, size, origin, dpi, max_chars)`（段階表示は `max_chars`）、`line_pitch` / `block_extent` / `complete` / `char_end` |
-| `Hyphenator` / `HyphenationDictionary` | 欧文のハイフネーション（TeX の Liang パターン）。`dict.for_language("en").add_pattern_file("hyph-en-us.tex")` で読み、`BreakOptions.hyphenation` に渡す。パターンが無くてもテキスト中のソフトハイフン U+00AD は常に切れる |
+| `Hyphenator` / `HyphenationDictionary` | 欧文のハイフネーション（TeX の Liang パターン）。`dict.for_language("en").add_pattern_file("hyph-en-us.tex")` で読み、`BreakOptions.hyphenation` に渡す。引くのは `TextStyle.language`、見つからなければ最初に足した言語（`set_default_language`）。パターンが無くてもテキスト中のソフトハイフン U+00AD は常に切れる |
 | `parse_tagged_text(text, options)` / `strip_tags(text)` | ゲーム向けのタグ記法（`<b>` `<ruby>` `<color>` `<outline>` `<link>` …）を段落にする。[タグ記法](tags.md) |
 | `measure_text(fonts, text, style, writing_mode)` | 折り返さない 1 行の送り・張り出し・クラスタ数 |
 | `fit_paragraph(fonts, para, wm, max_lines, ...)` | 行数上限に収まるまで文字サイズを縮めて組む（吹き出しのフィット）。結果の `scale` / `fits` を見る |
@@ -161,6 +161,9 @@ ps.line_break = bo
 ```
 
 パターンが無くても、本文中のソフトハイフン `\u00ad` は常に分割位置として扱われます（字面は出ません）。
+
+辞書は `TextStyle.language` で引きますが、見つからないときは**最初に足した言語**（`set_default_language` で変えられる）に
+落ちます。和文の文書（`language = "ja"`）に混ざる英単語を英語のパターンで割りたい、という普通のケースがそのまま動きます。
 
 ## リンク・ヒットテスト・キャレット・段階表示
 
