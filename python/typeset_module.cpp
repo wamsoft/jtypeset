@@ -6,6 +6,7 @@
  */
 
 #include <pybind11/pybind11.h>
+#include <pybind11/functional.h>
 #include <pybind11/stl.h>
 
 #include <map>
@@ -20,6 +21,7 @@
 #include "typeset/font/font_set.hpp"
 #include "typeset/image/image.hpp"
 #include "typeset/inl/paragraph.hpp"
+#include "typeset/inl/tag_parser.hpp"
 #include "typeset/obj/object.hpp"
 #include "typeset/obj/svg_import.hpp"
 #ifdef TYPESET_HAS_MICROTEX
@@ -1065,6 +1067,49 @@ Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
           py::arg("fonts"), py::arg("paragraph"), py::arg("writing_mode"),
           py::arg("line_lengths") = std::vector<Pt>{}, py::arg("default_length") = 200.0f,
           "段落を組んで ParagraphLayout（行ごとの文字範囲と長さ＋取り出し口）を返す（行長は行ごとに指定できる = \\parshape）");
+    // ---- タグ記法 ----
+    py::class_<inl::TagMarker>(m, "TagMarker", "タイミング等のマーカー（種類・値・本文での位置）")
+        .def_readonly("kind", &inl::TagMarker::kind)
+        .def_readonly("value", &inl::TagMarker::value)
+        .def_readonly("char_index", &inl::TagMarker::charIndex);
+    py::class_<inl::TagLink>(m, "TagLink", "リンクの範囲（名前と本文の文字範囲）")
+        .def_readonly("name", &inl::TagLink::name)
+        .def_readonly("start", &inl::TagLink::start)
+        .def_readonly("end", &inl::TagLink::end);
+    py::class_<inl::TagPlaceholder>(m, "TagPlaceholder", "<graph> で置いた行内プレースホルダ")
+        .def_readonly("name", &inl::TagPlaceholder::name)
+        .def_readonly("char_index", &inl::TagPlaceholder::charIndex)
+        .def_readonly("size", &inl::TagPlaceholder::size);
+    py::class_<inl::TagParseResult>(m, "TagParseResult",
+                                    "parse_tagged_text の結果（段落・マーカー・リンク・プレースホルダ・エラー）")
+        .def_readonly("paragraph", &inl::TagParseResult::paragraph)
+        .def_readonly("markers", &inl::TagParseResult::markers)
+        .def_readonly("links", &inl::TagParseResult::links)
+        .def_readonly("placeholders", &inl::TagParseResult::placeholders)
+        .def_readonly("errors", &inl::TagParseResult::errors);
+    py::class_<inl::TagParseOptions>(m, "TagParseOptions",
+                                     "タグ記法の解釈の設定（基準スタイル・段落スタイル・名前付きスタイル／family・置換）")
+        .def(py::init<>())
+        .def_readwrite("base_style", &inl::TagParseOptions::baseStyle)
+        .def_readwrite("paragraph_style", &inl::TagParseOptions::paragraphStyle)
+        .def_readwrite("named_styles", &inl::TagParseOptions::namedStyles, "<style name=\"…\"> で引くスタイル")
+        .def_readwrite("named_families", &inl::TagParseOptions::namedFamilies, "<font face=\"…\"> の family 列")
+        .def_readwrite("evaluate", &inl::TagParseOptions::evaluate, "<eval name=\"…\"> の置換（名前 → 文字列）")
+        .def_readwrite("sup_offset", &inl::TagParseOptions::supOffset)
+        .def_readwrite("sub_offset", &inl::TagParseOptions::subOffset)
+        .def_readwrite("sup_scale", &inl::TagParseOptions::supScale)
+        .def_readwrite("graph_default_size", &inl::TagParseOptions::graphDefaultSize)
+        .def_readwrite("keep_unknown_tags", &inl::TagParseOptions::keepUnknownTags);
+    m.def("parse_tagged_text",
+          [](const std::u16string& text, const inl::TagParseOptions& options) {
+              return inl::parseTaggedText(text, options);
+          },
+          py::arg("text"), py::arg("options"),
+          "タグ付きテキスト（richtext 互換）を段落にする。<b> <i> <u> <s> <sup> <sub> <font> <color> "
+          "<outline> <shadow> <style> <ruby> <emphasis> <tcy> <warichu> <jidori> <link> <graph> <br> <sp> "
+          "<eval> とタイミング系（<start> <delay> <wait> <sync> <keywait>）");
+    m.def("strip_tags", &inl::stripTags, py::arg("text"), "タグを取り除いた本文を返す");
+
     m.def("fit_paragraph",
           [](font::FontSet& fonts, const inl::Paragraph& para, WritingMode wm, int maxLines,
              std::vector<Pt> lineLengths, Pt defaultLength, float minScale, float step) {

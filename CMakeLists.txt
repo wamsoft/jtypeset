@@ -63,6 +63,7 @@ set(TYPESET_SOURCES
     src/inl/line_breaker.cpp
     src/inl/paragraph_layouter.cpp
     src/inl/query.cpp
+    src/inl/tag_parser.cpp
     src/inl/color_glyph.cpp
     # page: ブロック／ページ
     src/page/page.cpp

@@ -11,6 +11,7 @@
 #include "typeset/inl/item_builder.hpp"
 #include "typeset/inl/paragraph.hpp"
 #include "typeset/inl/shaper.hpp"
+#include "typeset/inl/tag_parser.hpp"
 #include "typeset/text/char_class.hpp"
 #include "typeset/text/line_break.hpp"
 #include "typeset/text/utf.hpp"
@@ -1695,4 +1696,151 @@ TEST_CASE("paragraph rotation wraps the output in a rotated group") {
     dl::DisplayList out0;
     inl::emitParagraph(out0, f0, WritingMode::HorizontalTb, origin);
     CHECK(!std::holds_alternative<dl::Group>(out0.items[0]));
+}
+
+TEST_CASE("tag parser: richtext tags become runs, styles and annotations") {
+    inl::TagParseOptions opts;
+    opts.baseStyle.font.family = {"serif"};
+    opts.baseStyle.size = 10.0f;
+    opts.namedFamilies["gothic"] = {"sans-ja", "sans"};
+    TextStyle titleStyle = opts.baseStyle;
+    titleStyle.size = 20.0f;
+    titleStyle.fill = Color::rgb(10, 20, 30);
+    opts.namedStyles["title"] = titleStyle;
+
+    // 本文とタグの対応、スタイルの入れ子
+    {
+        const inl::TagParseResult r = inl::parseTaggedText(
+            u"ふつう<b>ふとじ<color value=\"#ff0000\">あか</color>もどる</b>おわり", opts);
+        CHECK(r.errors.empty());
+        CHECK(r.paragraph.text() == u"ふつうふとじあかもどるおわり");
+        REQUIRE(r.paragraph.runs.size() == 5);
+        CHECK(r.paragraph.runs[0].style.font.weight == 400);
+        CHECK(r.paragraph.runs[1].style.font.weight == 700);
+        CHECK(r.paragraph.runs[2].style.font.weight == 700);
+        CHECK(r.paragraph.runs[2].style.fill.solid() == Color::rgb(255, 0, 0));
+        CHECK(r.paragraph.runs[3].style.font.weight == 700);
+        CHECK(r.paragraph.runs[3].style.fill.solid() == Color::rgb(0, 0, 0));
+        CHECK(r.paragraph.runs[4].style.font.weight == 400);
+    }
+    // font の属性
+    {
+        const inl::TagParseResult r = inl::parseTaggedText(
+            u"<font size=\"14\" weight=\"600\" face=\"gothic\" spacing=\"0.1\" width=\"0.8\">あ</font>", opts);
+        REQUIRE(r.paragraph.runs.size() == 1);
+        const TextStyle& st = r.paragraph.runs[0].style;
+        CHECK(st.size == doctest::Approx(14.0f));
+        CHECK(st.font.weight == 600);
+        CHECK(st.font.family == std::vector<std::string>{"sans-ja", "sans"});
+        CHECK(st.letterSpacing == doctest::Approx(0.1f));
+        CHECK(st.scaleX == doctest::Approx(0.8f));
+    }
+    // 下線・打消し線・上付き・名前付きスタイル
+    {
+        const inl::TagParseResult r = inl::parseTaggedText(
+            u"<u>した</u><s>けし</s><sup>うえ</sup><style name=\"title\">大</style>", opts);
+        REQUIRE(r.paragraph.runs.size() == 4);
+        CHECK(r.paragraph.runs[0].style.underline.has_value());
+        CHECK(r.paragraph.runs[1].style.strikethrough.has_value());
+        CHECK(r.paragraph.runs[2].style.baselineShift == doctest::Approx(opts.supOffset));
+        CHECK(r.paragraph.runs[2].style.size == doctest::Approx(10.0f * opts.supScale));
+        CHECK(r.paragraph.runs[3].style.size == doctest::Approx(20.0f));
+    }
+    // 縁取り・影・二重縁取り（add）
+    {
+        const inl::TagParseResult r = inl::parseTaggedText(
+            u"<outline color=\"#0000ff\" width=\"2\">ふち</outline>"
+            u"<shadow color=\"#808080\" x=\"1\" y=\"2\" blur=\"3\">かげ</shadow>"
+            u"<outline color=\"#000000\" width=\"3\"><outline add color=\"#ffffff\" width=\"1\">二重</outline></outline>",
+            opts);
+        REQUIRE(r.paragraph.runs.size() == 3);
+        REQUIRE(r.paragraph.runs[0].style.stroke.has_value());
+        CHECK(r.paragraph.runs[0].style.stroke->color.solid() == Color::rgb(0, 0, 255));
+        CHECK(r.paragraph.runs[0].style.stroke->width == doctest::Approx(2.0f));
+        REQUIRE(r.paragraph.runs[1].style.shadow.has_value());
+        CHECK(r.paragraph.runs[1].style.shadow->color == Color::rgb(128, 128, 128));
+        CHECK(r.paragraph.runs[1].style.shadow->offset.x == doctest::Approx(1.0f));
+        CHECK(r.paragraph.runs[1].style.shadow->blur == doctest::Approx(3.0f));
+        // add: 層が 2 枚（外側の白 1pt が下、元の黒 3pt ＋ 塗り）
+        const TextStyle& dbl = r.paragraph.runs[2].style;
+        REQUIRE(dbl.layers.size() == 2);
+        REQUIRE(dbl.layers[0].stroke.has_value());
+        CHECK(dbl.layers[0].stroke->color.solid() == Color::rgb(255, 255, 255));
+        REQUIRE(dbl.layers[1].stroke.has_value());
+        CHECK(dbl.layers[1].stroke->color.solid() == Color::rgb(0, 0, 0));
+    }
+    // 注記
+    {
+        const inl::TagParseResult r = inl::parseTaggedText(
+            u"<ruby text=\"かんじ\" mode=\"mono\">漢字</ruby>と<emphasis mark=\"dot\">圏点</emphasis>と"
+            u"<tcy>12</tcy>と<jidori em=\"4\">字取</jidori>", opts);
+        CHECK(r.paragraph.text() == u"漢字と圏点と12と字取");
+        REQUIRE(r.paragraph.annotations.size() == 4);
+        const auto& ruby = r.paragraph.annotations[0];
+        CHECK(ruby.type == inl::AnnotationType::Ruby);
+        CHECK(ruby.start == 0);
+        CHECK(ruby.end == 2);
+        CHECK(ruby.text == u"かんじ");
+        CHECK(ruby.rubyMode == inl::RubyMode::Mono);
+        CHECK(r.paragraph.annotations[1].type == inl::AnnotationType::Emphasis);
+        CHECK(r.paragraph.annotations[1].mark == inl::EmphasisMark::Dot);
+        CHECK(r.paragraph.annotations[1].start == 3);
+        CHECK(r.paragraph.annotations[1].end == 5);
+        CHECK(r.paragraph.annotations[2].type == inl::AnnotationType::TateChuYoko);
+        CHECK(r.paragraph.annotations[3].type == inl::AnnotationType::Jidori);
+        CHECK(r.paragraph.annotations[3].jidoriEm == doctest::Approx(4.0f));
+    }
+    // リンク・マーカー・プレースホルダ・改行・空白・実体参照
+    {
+        const inl::TagParseResult r = inl::parseTaggedText(
+            u"<link name=\"a\">押す</link>ここで<keywait>待つ<br><sp width=\"3\">後"
+            u"<graph name=\"icon\" width=\"12\" height=\"8\">。&lt;タグ&gt;&amp;", opts);
+        REQUIRE(r.links.size() == 1);
+        CHECK(r.links[0].name == "a");
+        CHECK(r.links[0].start == 0);
+        CHECK(r.links[0].end == 2);
+        REQUIRE(r.markers.size() == 1);
+        CHECK(r.markers[0].kind == "keywait");
+        CHECK(r.markers[0].charIndex == 5);
+        REQUIRE(r.placeholders.size() == 1);
+        CHECK(r.placeholders[0].name == "icon");
+        CHECK(r.placeholders[0].size.w == doctest::Approx(12.0f));
+        CHECK(r.placeholders[0].size.h == doctest::Approx(8.0f));
+        CHECK(r.paragraph.text() == u"押すここで待つ\n   後￼。<タグ>&");
+    }
+    // 未知のタグ・閉じ忘れ・閉じすぎは errors に出して読み飛ばす
+    {
+        const inl::TagParseResult r = inl::parseTaggedText(u"<nope>あ</nope><b>い</i>う", opts);
+        CHECK(r.paragraph.text() == u"あいう");
+        CHECK(r.errors.size() >= 2);
+        // タグに見えないものは本文のまま
+        const inl::TagParseResult r2 = inl::parseTaggedText(u"1 < 2 & 3 > 0", opts);
+        CHECK(r2.paragraph.text() == u"1 < 2 & 3 > 0");
+    }
+    CHECK(inl::stripTags(u"<b>あ</b><ruby text=\"い\">う</ruby>") == u"あう");
+}
+
+TEST_CASE("tag parser: the parsed paragraph lays out with its annotations") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+    inl::TagParseOptions opts;
+    opts.baseStyle = fx.style(10.0f);
+    const inl::TagParseResult r = inl::parseTaggedText(
+        u"<ruby text=\"わがはい\">吾輩</ruby>は<b>猫</b>である"
+        u"<graph name=\"g\" width=\"20\" height=\"10\">。", opts);
+    CHECK(r.errors.empty());
+
+    inl::ParagraphLayouter layouter(fx.fonts);
+    const inl::ConstantLineShape shape(200.0f);
+    const inl::ParagraphFragment frag = layouter.layout(r.paragraph, WritingMode::HorizontalTb, shape);
+    REQUIRE(frag.lines.size() == 1);
+    // ルビのグリフが付く
+    size_t annotated = 0;
+    for (const inl::PlacedGlyph& g : frag.lines[0].glyphs) if (g.annotation) ++annotated;
+    CHECK(annotated == 4);
+    // プレースホルダの位置が取れる
+    const auto phs = inl::placeholderRects(frag, WritingMode::HorizontalTb, Point{0, 20});
+    REQUIRE(phs.size() == 1);
+    CHECK(phs[0].id == "g");
+    CHECK(phs[0].rect.w == doctest::Approx(20.0f));
 }

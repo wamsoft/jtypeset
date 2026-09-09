@@ -35,6 +35,7 @@ nav:
   - はじめに: index.md
   - Markdown → PDF の手引き: markdown.md
   - サンプル（Markdown と PDF）: samples.md
+  - タグ記法（ゲーム向け）: tags.md
   - Python ガイド: python_guide.md
   - C++ ガイド: cpp_guide.md
   - 技術解説: architecture.md

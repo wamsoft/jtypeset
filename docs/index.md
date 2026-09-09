@@ -8,6 +8,7 @@ Python パッケージ **jtypeset** と、Markdown から日本語の PDF を作
 | したいこと | 読むところ |
 |---|---|
 | Markdown を書いて PDF にしたい | [Markdown → PDF の手引き](markdown.md) |
+| ゲームのタグ付きテキストを組みたい | [タグ記法](tags.md) |
 | Python から段落・表・画像を組んで PDF にしたい | [Python ガイド](python_guide.md)、[Python リファレンス](python/index.html) |
 | C++ から使いたい、組み込みたい | [C++ ガイド](cpp_guide.md)、[C++ リファレンス](cpp/html/index.html) |
 | ソースからビルドしたい | [ビルド](build.md) |
