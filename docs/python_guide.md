@@ -46,7 +46,7 @@ pages[0].save_svg("out_p1.svg")
 | `FontSet` | フォントを開く（`load_file` / `load_bytes`）か宣言する（`declare(path, key, family, weight, italic, languages, ranges, face_index)`: 初回使用時に開く）。`has` / `is_loaded` / `keys` / `find` / `select` / `language_fonts` / `size` で状態を見られる。キー／family 名で引き、同じ family の複数 face から weight / italic の最近傍を選ぶ。文字が無ければ次の family へフォールバック。`set_language_fonts("zh", ["sans-sc"])` で言語ごとに先に試す family |
 | `TextStyle` / `ParagraphStyle` | 文字（フォント・サイズ・色・縁取り・影 `shadow`・層 `layers`・下線 `underline`・打消し線 `strikethrough`・ベースラインのずらし…）／段落（揃え・行送り・一字下げ・空白保持・タブ幅…） |
 | `FontSpec` | family 列・weight・italic・`variations`（バリアブルフォントの軸 `{'wght': 700}`）。`TextStyle.features` は OpenType feature（`['palt']`） |
-| `Paint` / `GradientStop` / `PaintKind` / `PaintUnits` | 塗り。`Paint.linear(start, end, stops)` / `Paint.radial(center, radius, stops)`。座標は既定で対象の外接矩形の 0〜1（`PaintUnits.USER_SPACE` でページ座標）。`Color` を渡せる所にそのまま渡せる（`TextLayer(fill=...)` だけは Color のみ受けるので、グラデーションの層は `layer.fill = paint` と代入する） |
+| `Paint` / `GradientStop` / `PaintKind` / `PaintUnits` | 塗り。`Paint.linear(start, end, stops)` / `Paint.radial(center, radius, stops)`。座標は既定で対象の外接矩形の 0〜1（`PaintUnits.USER_SPACE` でページ座標）。`Color` を渡せる所にそのまま渡せる |
 | `EmojiPresentation` / `Direction` / `TabAlign` / `FontDeclaration` / `CodepointRange` | 絵文字の表示形式・段落の基底方向・タブの揃え・フォントの宣言・コードポイント範囲 |
 | `TextShadow` / `TextLayer` / `TextDecoration` | 影（色・ずらし・ぼかし）／外観の 1 層（塗り・縁取り・ずらし・ぼかし。`layers` に下から上の順）／下線・打消し線（色・太さ・位置の補正） |
 | `Paragraph` | run の列＋注記。`add_run(text, style, literal=False)`、`add_image`、`add_object`（外部オブジェクト）、`add_placeholder(size, style, id)`（描かない空箱。位置は組んだあと取る）、`add_footnote`、`annotate` |
@@ -62,7 +62,7 @@ pages[0].save_svg("out_p1.svg")
 | `PageSequence` / `PageMaster` | 判型（`ts.paper.A4` … `ts.paper.landscape(size)`）、余白、段数、書字方向、`header` / `footer`（`RunningText`）、duplex |
 | `FlowLayouter.layout(...)` | ページ列を返す。`fields`（`{title}` 等）、`figure_format` / `table_format` / `equation_format`、`objects`（ObjectRegistry）、`footnote_marker_format` / `footnote_label_format` / `footnote_per_page`、`balance_last_page`、`draw_guides` |
 | `Page` | `number`、`save_png(path, dpi)`、`save_svg(path)`、`to_svg()`。PDF は `save_pdf(pages, path, title, author, subset_fonts, compress)` → `(ok, warnings)` |
-| `ObjectRegistry` | 外部オブジェクトのハンドラ。`add(name, fn)`（fn は request dict → SVG 文字列か `{"svg", "baseline"}`）、`add_command(name, cmd)` |
+| `ObjectRegistry` | 外部オブジェクトのハンドラ。`add(name, fn)`（fn は request dict → SVG 文字列か `{"svg", "baseline"}`）、`add_command(name, cmd)`、`add_microtex(name, fonts, ...)`（同梱の LaTeX 数式）、`has` / `clear_cache` / `cache_size` / `errors` |
 
 本文中の置換: `{page}` `{pages}` `{title}`（柱・ノンブル、`fields` のキー）、`{ref:label}` `{page:label}`（`BlockStyle.label` を付けた
 見出し・図・表・式の番号とページ）、キャプションの `{fig}` `{table}` `{eq}`、索引の `{index:よみ|用語}`。

@@ -155,8 +155,9 @@ Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
     py::class_<TextLayer>(m, "TextLayer",
                           "文字の外観の 1 層（塗り・縁取り・ずらし・ぼかし）。TextStyle.layers に下から上の順で並べる")
         .def(py::init<>())
-        .def(py::init([](std::optional<Color> fill, std::optional<Stroke> stroke, Point offset, Pt blur) {
-                 TextLayer l; l.fill = fill; l.stroke = stroke; l.offset = offset; l.blur = blur; return l;
+        .def(py::init([](std::optional<Paint> fill, std::optional<Stroke> stroke, Point offset, Pt blur) {
+                 TextLayer l; l.fill = std::move(fill); l.stroke = std::move(stroke);
+                 l.offset = offset; l.blur = blur; return l;
              }),
              py::arg("fill") = std::nullopt, py::arg("stroke") = std::nullopt,
              py::arg("offset") = Point{0.0f, 0.0f}, py::arg("blur") = 0.0f)

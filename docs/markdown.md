@@ -64,7 +64,7 @@ Noto Color Emoji）が見つかれば自動でフォールバックに加わり�
 | `--toc` | 先頭に目次 |
 | `--no-numbering` | 見出しを採番しない |
 | `--no-indent` | 段落の一字下げをしない |
-| `--math mathtext` / `--math command:<cmd>` | 数式ハンドラ |
+| `--math <handler>` | 数式ハンドラ（`auto` / `microtex` / `mathtext` / `none` / `command:<cmd>`） |
 | `--png DPI` | 各ページを PNG にも出す |
 | `--guides` | 版面と段の枠を描く（レイアウト確認用） |
 
@@ -110,7 +110,7 @@ toc: true                 # 先頭に目次（本文の [toc] でも置ける）
 toc-depth: 2
 numbering: true           # 見出しの採番（1. / 1.1 / 1.1.1）
 heading-page-break: 0     # このレベル以下の見出しで改ページ（1 なら章ごとに改ページ）
-header: "{title}"         # 柱。"" （空文字）で無し。null は既定（題名）と同じ
+header: "{title}"         # 柱。"" （空文字）で無し。null は既定（題名）と同じ。{page} {pages} {title} {author} {date} が使える
 footer: "{page} / {pages}"
 links: footnote           # footnote / inline / none
 math:
@@ -252,10 +252,10 @@ $$ (eq-gauss)
 ### 改ページ・段組・目次・索引
 
 ```markdown
-<!-- pagebreak -->        改ページ
+<!-- pagebreak -->        改ページ（<!-- newpage --> でも同じ）
 <!-- columnbreak -->      改段
 <!-- columns: 2 -->       ここから 2 段組（ページ単位で切り替わる）
-[toc]                     目次をここに
+[toc]                     目次をここに（<!-- toc --> でも同じ）
 [index]                   索引をここに。本文の {index:よみ|用語} を集める
 ```
 

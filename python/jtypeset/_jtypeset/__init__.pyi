@@ -2109,7 +2109,7 @@ class TextLayer:
     def __init__(self) -> None:
         ...
     @typing.overload
-    def __init__(self, fill: jtypeset._jtypeset.Color | None = None, stroke: jtypeset._jtypeset.Stroke | None = None, offset: Point = ..., blur: typing.SupportsFloat | typing.SupportsIndex = 0.0) -> None:
+    def __init__(self, fill: jtypeset._jtypeset.Paint | None = None, stroke: jtypeset._jtypeset.Stroke | None = None, offset: Point = ..., blur: typing.SupportsFloat | typing.SupportsIndex = 0.0) -> None:
         ...
     @property
     def blur(self) -> float:
