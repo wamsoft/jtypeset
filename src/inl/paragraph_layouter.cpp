@@ -532,6 +532,7 @@ ParagraphFragment ParagraphLayouter::layoutOnce(const Paragraph& para, WritingMo
     }
     frag.charEnd = text.size();
     frag.complete = true;
+    frag.rotation = para.style.rotation;
     return frag;
 }
 
@@ -604,6 +605,19 @@ void emitDecorations(dl::DisplayList& out, const ParagraphFragment& frag, const 
 
 void emitParagraph(dl::DisplayList& out, const ParagraphFragment& frag, WritingMode wm,
                    Point origin, int lineOffset, size_t maxChars) {
+    // 段落の回転: origin を中心に回す Group で包み、中身は回さずに組む
+    if (frag.rotation != 0.0f) {
+        dl::DisplayList inner;
+        ParagraphFragment flat = frag;
+        flat.rotation = 0.0f;
+        emitParagraph(inner, flat, wm, Point{0.0f, 0.0f}, lineOffset, maxChars);
+        const float rad = frag.rotation * 3.14159265358979f / 180.0f;
+        dl::Group grp;
+        grp.xform = multiply(Matrix::translation(origin.x, origin.y), Matrix::rotation(rad));
+        grp.children = std::move(inner.items);
+        out.add(std::move(grp));
+        return;
+    }
     // スタイルごとの層（下から上）
     std::vector<std::vector<TextLayer>> layers;
     layers.reserve(frag.styles.size());
@@ -668,7 +682,7 @@ void emitParagraph(dl::DisplayList& out, const ParagraphFragment& frag, WritingM
                     continue;
                 }
                 // カラーグリフ（絵文字）はレイヤ／ビットマップとして置く（3 backend で同じ色になる）
-                if (g.face && g.face->descriptor().color) {
+                if (g.face && g.face->descriptor().color && !g.monochrome) {
                     if (k != 0) continue;
                     const Point pp = toPhysical(wm, LogicalPoint{g.inline_, g.block}, lo);
                     flush();

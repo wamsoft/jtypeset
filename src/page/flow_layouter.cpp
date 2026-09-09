@@ -402,7 +402,7 @@ private:
     void layoutRunning(const RunningText& rt, bool top);
 
     /// 論理座標の矩形を塗る（罫線・背景用）。index を渡すとその位置へ挿入（背景を後ろへ）
-    void fillLogicalRect(Pt inline0, Pt inline1, Pt block0, Pt block1, Color color,
+    void fillLogicalRect(Pt inline0, Pt inline1, Pt block0, Pt block1, const Paint& color,
                          std::optional<size_t> insertAt = std::nullopt);
     /// 段落を指定の行長・位置で全部組んで置く（表のセル・キャプション用）。消費した行送り方向の量を返す
     Pt placeParagraphAt(const inl::Paragraph& para, Pt blockOffset, Pt inlineOffset, Pt lineLength,
@@ -554,7 +554,7 @@ int Flower::linesThatFit(Pt pitch) const {
     return static_cast<int>(std::floor((r.remaining() + kEps) / pitch));
 }
 
-void Flower::fillLogicalRect(Pt inline0, Pt inline1, Pt block0, Pt block1, Color color,
+void Flower::fillLogicalRect(Pt inline0, Pt inline1, Pt block0, Pt block1, const Paint& color,
                              std::optional<size_t> insertAt) {
     const Rect r = region().toRect(inline0, inline1, block0, block1);
     if (r.w <= 0.0f || r.h <= 0.0f) return;

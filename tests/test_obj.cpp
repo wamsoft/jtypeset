@@ -98,8 +98,8 @@ TEST_CASE("svg import: size, baseline, elements, defs/use, transform") {
     const auto* rect = std::get_if<dl::PathItem>(&res.items[0]);
     REQUIRE(rect);
     REQUIRE(rect->fill.has_value());
-    CHECK(rect->fill->g == 255);
-    CHECK(rect->fill->r == 0);
+    CHECK(rect->fill->solid().g == 255);
+    CHECK(rect->fill->solid().r == 0);
     CHECK_FALSE(rect->stroke.has_value());
     const Rect rb = pathBounds({res.items[0]});
     CHECK(rb.x == doctest::Approx(3.75f));
@@ -111,7 +111,7 @@ TEST_CASE("svg import: size, baseline, elements, defs/use, transform") {
     const auto* used = std::get_if<dl::PathItem>(&res.items[1]);
     REQUIRE(used);
     REQUIRE(used->fill.has_value());
-    CHECK(used->fill->r == 255);
+    CHECK(used->fill->solid().r == 255);
     const Rect ub = pathBounds({res.items[1]});
     CHECK(ub.x == doctest::Approx((10 + 100) * 0.375f));
     CHECK(ub.w == doctest::Approx(10 * 0.375f));
@@ -121,7 +121,7 @@ TEST_CASE("svg import: size, baseline, elements, defs/use, transform") {
     REQUIRE(curve);
     CHECK_FALSE(curve->fill.has_value());
     REQUIRE(curve->stroke.has_value());
-    CHECK(curve->stroke->color.b == 255);
+    CHECK(curve->stroke->color.solid().b == 255);
     CHECK(curve->stroke->width == doctest::Approx(2.0f * 0.375f));
 
     // 全体が箱の中

@@ -245,6 +245,8 @@ struct PdfWriter::Impl {
     std::vector<ImageResource> images;
     std::unordered_map<const dl::Image*, size_t> imageMap;
     std::vector<OutlineEntry> outline;
+    /// シェーディングパターン（グラデーション）: 辞書の本体 → リソース名。同じものは 1 つにまとめる
+    std::vector<std::pair<std::string, std::string>> patterns;   // (dict, name)
 
     // --- 現在のページの描画状態 ---
     std::string curFontName;
@@ -271,18 +273,26 @@ struct PdfWriter::Impl {
     std::string alphaStateName(float alpha);
 
     void ensureFillColor(Color c);
+    void ensureFillPattern(const std::string& name);
     void ensureStrokeColor(Color c);
+    void ensureStrokePattern(const std::string& name);
+    /**
+     * グラデーションのシェーディングパターンを登録して名前を返す。
+     * @param box BoundingBox 単位の基準にする外接矩形（ページ座標）
+     */
+    std::string patternName(const Paint& paint, const Rect& box);
     void ensureLineWidth(float w);
     void ensureAlpha(float alpha);
 
     void drawItems(const std::vector<dl::Item>& items, const Matrix& ctm, float opacity);
     void drawGlyphRun(const dl::GlyphRun& run, const Matrix& ctm, float opacity);
-    void drawPath(const Path& path, const Matrix& ctm, const std::optional<Color>& fill,
+    void drawPath(const Path& path, const Matrix& ctm, const std::optional<Paint>& fill,
                   const std::optional<Stroke>& stroke, bool evenOdd, float opacity);
     void drawImage(const dl::ImageItem& item, const Matrix& ctm, float opacity);
 
     void emitGlyph(FontResource* font, uint32_t gid, float fontSize, const Mat2& m,
-                   Point pen, int textRender, float strokeWidth, Color color, float opacity);
+                   Point pen, int textRender, float strokeWidth, const Paint& paint, float opacity,
+                   const std::string& pattern = std::string());
     std::string pathOps(const Path& path, const Matrix& ctm) const;
 };
 
@@ -376,6 +386,82 @@ void PdfWriter::Impl::ensureFillColor(Color c) {
     curFillColor = op;
 }
 
+void PdfWriter::Impl::ensureFillPattern(const std::string& name) {
+    const std::string op = "/Pattern cs /" + name + " scn\n";
+    if (op == curFillColor) return;
+    page().content += op;
+    curFillColor = op;
+}
+
+void PdfWriter::Impl::ensureStrokePattern(const std::string& name) {
+    const std::string op = "/Pattern CS /" + name + " SCN\n";
+    if (op == curStrokeColor) return;
+    page().content += op;
+    curStrokeColor = op;
+}
+
+std::string PdfWriter::Impl::patternName(const Paint& paint, const Rect& box) {
+    // 停止点 → 関数（type 2 の指数関数を type 3 で継ぎ合わせる）
+    auto colorArray = [](Color c) {
+        return "[" + num(c.r / 255.0f) + " " + num(c.g / 255.0f) + " " + num(c.b / 255.0f) + "]";
+    };
+    std::vector<GradientStop> stops = paint.stops;
+    std::sort(stops.begin(), stops.end(),
+              [](const GradientStop& a, const GradientStop& b) { return a.offset < b.offset; });
+    std::string fn;
+    if (stops.size() == 2) {
+        fn = "<< /FunctionType 2 /Domain [0 1] /C0 " + colorArray(stops.front().color) +
+             " /C1 " + colorArray(stops.back().color) + " /N 1 >>";
+    } else {
+        std::string funcs = "[";
+        std::string bounds = "[";
+        std::string encode = "[";
+        for (size_t i = 0; i + 1 < stops.size(); ++i) {
+            funcs += "<< /FunctionType 2 /Domain [0 1] /C0 " + colorArray(stops[i].color) +
+                     " /C1 " + colorArray(stops[i + 1].color) + " /N 1 >> ";
+            encode += "0 1 ";
+            if (i + 2 < stops.size()) bounds += num(stops[i + 1].offset) + " ";
+        }
+        funcs += "]";
+        bounds += "]";
+        encode += "]";
+        fn = "<< /FunctionType 3 /Domain [0 1] /Functions " + funcs + " /Bounds " + bounds +
+             " /Encode " + encode + " >>";
+    }
+
+    std::string shading;
+    if (paint.kind == PaintKind::Radial) {
+        shading = "<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [" +
+                  num(paint.start.x) + " " + num(paint.start.y) + " 0 " +
+                  num(paint.start.x) + " " + num(paint.start.y) + " " + num(paint.radius) +
+                  "] /Function " + fn + " /Extend [true true] >>";
+    } else {
+        shading = "<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [" +
+                  num(paint.start.x) + " " + num(paint.start.y) + " " +
+                  num(paint.end.x) + " " + num(paint.end.y) +
+                  "] /Function " + fn + " /Extend [true true] >>";
+    }
+
+    // 塗りの座標系 → PDF のページ座標（y 反転）。BoundingBox は単位正方形を外接矩形へ
+    const float h = page().height;
+    std::string matrix;
+    if (paint.units == PaintUnits::UserSpace) {
+        matrix = "[1 0 0 -1 0 " + num(h) + "]";
+    } else {
+        const float bw = box.w > 1e-6f ? box.w : 1.0f;
+        const float bh = box.h > 1e-6f ? box.h : 1.0f;
+        matrix = "[" + num(bw) + " 0 0 " + num(-bh) + " " + num(box.x) + " " + num(h - box.y) + "]";
+    }
+    const std::string dict = "<< /Type /Pattern /PatternType 2 /Matrix " + matrix +
+                             " /Shading " + shading + " >>";
+    for (const auto& p : patterns) {
+        if (p.first == dict) return p.second;
+    }
+    const std::string name = "Pt" + std::to_string(patterns.size() + 1);
+    patterns.emplace_back(dict, name);
+    return name;
+}
+
 void PdfWriter::Impl::ensureStrokeColor(Color c) {
     const std::string op = colorOp(c, "RG");
     if (op == curStrokeColor) return;
@@ -402,16 +488,20 @@ void PdfWriter::Impl::ensureAlpha(float alpha) {
 
 void PdfWriter::Impl::emitGlyph(FontResource* font, uint32_t gid, float fontSize,
                                 const Mat2& m, Point pen, int textRender,
-                                float strokeWidth, Color color, float opacity) {
+                                float strokeWidth, const Paint& paint, float opacity,
+                                const std::string& pattern) {
     if (!font->embeddable) return;
     font->usedGlyphs.insert(gid);
 
-    ensureAlpha(color.a / 255.0f * opacity);
+    // グラデーションは停止点ごとの不透明度を持てないので、代表値（最大）を全体に掛ける
+    ensureAlpha(paint.maxAlpha() / 255.0f * opacity);
     if (textRender != 0) {
-        ensureStrokeColor(color);
+        if (pattern.empty()) ensureStrokeColor(paint.solid());
+        else                 ensureStrokePattern(pattern);
         ensureLineWidth(strokeWidth);
     }
-    ensureFillColor(color);
+    if (pattern.empty()) ensureFillColor(paint.solid());
+    else                 ensureFillPattern(pattern);
 
     std::string& out = page().content;
     out += "BT\n";
@@ -451,6 +541,18 @@ void PdfWriter::Impl::drawGlyphRun(const dl::GlyphRun& run, const Matrix& ctm, f
         lin.xx /= devScale; lin.xy /= devScale; lin.yx /= devScale; lin.yy /= devScale;
     }
 
+    // グラデーションはシェーディングパターンで塗る（BoundingBox 座標は run 全体の外接矩形）
+    std::string fillPattern, strokePattern;
+    if ((run.fill && run.fill->isGradient()) || (run.stroke && run.stroke->color.isGradient())) {
+        const Rect b = dl::runBounds(run);
+        const Point p0 = ctm.apply(Point{b.x, b.y});
+        const Point p1 = ctm.apply(Point{b.right(), b.bottom()});
+        const Rect box{std::min(p0.x, p1.x), std::min(p0.y, p1.y),
+                       std::fabs(p1.x - p0.x), std::fabs(p1.y - p0.y)};
+        if (run.fill && run.fill->isGradient()) fillPattern = patternName(*run.fill, box);
+        if (run.stroke && run.stroke->color.isGradient()) strokePattern = patternName(run.stroke->color, box);
+    }
+
     for (const dl::Glyph& g : run.glyphs) {
         const Point pen = ctm.apply(g.pos);
         const Mat2 m = multiply(lin, g.xform);
@@ -467,15 +569,16 @@ void PdfWriter::Impl::drawGlyphRun(const dl::GlyphRun& run, const Matrix& ctm, f
             font->toUnicode.emplace(g.gid, cp);
         }
 
-        if (run.fill && run.fill->a > 0) {
+        if (run.fill && run.fill->maxAlpha() > 0) {
             // フェイクボールドは同色の縁取りを重ねて太らせる（2 Tr）
             const float embolden = run.embolden * devScale;
             emitGlyph(font, g.gid, fontSize, m, pen, embolden > 0.0f ? 2 : 0, embolden,
-                      *run.fill, opacity);
+                      *run.fill, opacity, fillPattern);
         }
-        if (run.stroke && run.stroke->color.a > 0 && run.stroke->width > 0.0f) {
+        if (run.stroke && run.stroke->color.maxAlpha() > 0 && run.stroke->width > 0.0f) {
             emitGlyph(font, g.gid, fontSize, m, pen, 1,
-                      (run.stroke->width + run.embolden) * devScale, run.stroke->color, opacity);
+                      (run.stroke->width + run.embolden) * devScale, run.stroke->color, opacity,
+                      strokePattern);
         }
     }
 }
@@ -530,23 +633,35 @@ std::string PdfWriter::Impl::pathOps(const Path& path, const Matrix& ctm) const 
 }
 
 void PdfWriter::Impl::drawPath(const Path& path, const Matrix& ctm,
-                               const std::optional<Color>& fill,
+                               const std::optional<Paint>& fill,
                                const std::optional<Stroke>& stroke, bool evenOdd,
                                float opacity) {
     if (path.empty()) return;
-    const bool doFill = fill && fill->a > 0;
-    const bool doStroke = stroke && stroke->color.a > 0 && stroke->width > 0.0f;
+    const bool doFill = fill && fill->maxAlpha() > 0;
+    const bool doStroke = stroke && stroke->color.maxAlpha() > 0 && stroke->width > 0.0f;
     if (!doFill && !doStroke) return;
+
+    // グラデーションのパターン（BoundingBox 座標はパスの外接矩形）
+    std::string fillPattern, strokePattern;
+    if ((doFill && fill->isGradient()) || (doStroke && stroke->color.isGradient())) {
+        const Rect box = path.transformed(ctm).controlBounds();
+        if (doFill && fill->isGradient()) fillPattern = patternName(*fill, box);
+        if (doStroke && stroke->color.isGradient()) strokePattern = patternName(stroke->color, box);
+    }
 
     std::string& out = page().content;
     out += "q\n";
     // 透明度は塗りと線で別々に出せないので、塗りの方を優先して 1 つの gs にする
-    const float alpha = (doFill ? fill->a : stroke->color.a) / 255.0f * opacity;
+    const float alpha = (doFill ? fill->maxAlpha() : stroke->color.maxAlpha()) / 255.0f * opacity;
     if (alpha < 0.999f) out += "/" + alphaStateName(alpha) + " gs\n";
-    if (doFill) out += colorOp(*fill, "rg");
+    if (doFill) {
+        out += fillPattern.empty() ? colorOp(fill->solid(), "rg")
+                                   : "/Pattern cs /" + fillPattern + " scn\n";
+    }
     if (doStroke) {
         const float devScale = std::sqrt(std::fabs(ctm.determinant()));
-        out += colorOp(stroke->color, "RG");
+        out += strokePattern.empty() ? colorOp(stroke->color.solid(), "RG")
+                                     : "/Pattern CS /" + strokePattern + " SCN\n";
         out += num(stroke->width * devScale) + " w\n";
         out += std::to_string(joinCode(stroke->join)) + " j\n";
         out += std::to_string(capCode(stroke->cap)) + " J\n";
@@ -878,7 +993,15 @@ std::string PdfWriter::build() {
         gsDictEntries += " /" + entry.second + " " + std::to_string(id) + " 0 R";
     }
 
+    // --- シェーディングパターン（グラデーション）---
+    std::string patternEntries;
+    for (const auto& p : impl_->patterns) {
+        const int id = addObject(p.first);
+        patternEntries += " /" + p.second + " " + std::to_string(id) + " 0 R";
+    }
+
     std::string resources = "<< /ProcSet [/PDF /Text /ImageC]";
+    if (!patternEntries.empty()) resources += " /Pattern <<" + patternEntries + " >>";
     if (!fontDictEntries.empty()) resources += " /Font <<" + fontDictEntries + " >>";
     if (!gsDictEntries.empty()) resources += " /ExtGState <<" + gsDictEntries + " >>";
     if (!xobjEntries.empty()) resources += " /XObject <<" + xobjEntries + " >>";

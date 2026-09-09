@@ -46,6 +46,8 @@ struct PlacedGlyph {
     bool annotation = false;
     /// 行内プレースホルダ（大きさだけの空箱。描かない。imageSize が箱の大きさ）
     bool placeholder = false;
+    /// カラーフォントでもモノクロのアウトラインとして描く（EmojiPresentation::Text / VS15）
+    bool monochrome = false;
 
     /// 行内画像（グリフではなく画像を置く）。block は画像中心の中心線からのずれ
     std::shared_ptr<const dl::Image> image;

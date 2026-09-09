@@ -177,6 +177,7 @@ struct ParagraphFragment {
     size_t charEnd = 0;
     bool complete = false;              ///< 本文を最後まで組めた
     Pt linePitch = 0.0f;                ///< 行送り
+    float rotation = 0.0f;              ///< 段落の回転（度。emitParagraph が Group で包む）
     Pt baseSize = 0.0f;
     std::shared_ptr<const std::u16string> text;   ///< 元テキスト（ToUnicode 用）
 

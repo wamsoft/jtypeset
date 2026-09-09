@@ -4,6 +4,8 @@
 
 #include "backend/path_raster.hpp"
 #include "typeset/backend/raster.hpp"
+#include "typeset/backend/svg_writer.hpp"
+#include "typeset/backend/pdf_writer.hpp"
 #include "typeset/font/font_set.hpp"
 #include "typeset/inl/paragraph.hpp"
 
@@ -202,4 +204,168 @@ TEST_CASE("sfnt_info: fsType embedding permissions and TTC face directories") {
     CHECK(t1.unitsPerEm == 1000);
     CHECK(t1.dirOffset == dir1);
     CHECK_FALSE(typeset::backend::parseSfnt(ttc.data(), ttc.size(), bad, 2));
+}
+
+TEST_CASE("gradients: linear and radial paint on rects, paths and glyphs in all three backends") {
+    font::FontSet fonts;
+    auto latin = fonts.loadFile("data/NotoSerif-Regular.ttf", "serif");
+    if (!latin) { MESSAGE("fonts not found; skipping"); return; }
+    fonts.loadFile("data/NotoSerifJP-Regular.otf", "jp");
+
+    const std::vector<GradientStop> stops{{0.0f, Color::rgb(220, 30, 30)},
+                                          {0.5f, Color::rgb(240, 200, 40)},
+                                          {1.0f, Color::rgb(20, 80, 220)}};
+    TextStyle st;
+    st.font.family = {"serif", "jp"};
+    st.size = 34.0f;
+    st.fill = Paint::linear(Point{0, 0}, Point{1, 1}, stops);
+    inl::Paragraph para = inl::Paragraph::plain(u"Gradient 見出し", st);
+    para.style.align = Align::Start;
+    para.style.lineBreak.justify = false;
+    inl::ParagraphLayouter layouter(fonts);
+    const inl::ConstantLineShape shape(360.0f);
+    const inl::ParagraphFragment frag = layouter.layout(para, WritingMode::HorizontalTb, shape);
+
+    dl::DisplayList page;
+    page.page = Size{400, 200};
+    page.addRect(Rect{0, 0, 400, 200}, Color::rgb(255, 255, 255));
+    // 左右に赤 → 青の線形グラデーション（BoundingBox 単位）
+    page.addRect(Rect{20, 110, 160, 70},
+                 Paint::linear(Point{0, 0}, Point{1, 0},
+                               {{0.0f, Color::rgb(255, 0, 0)}, {1.0f, Color::rgb(0, 0, 255)}}));
+    // ページ座標のグラデーションで縁取ったパス
+    Path pp;
+    pp.addRect(Rect{210, 110, 160, 70});
+    Stroke stroke;
+    stroke.width = 6.0f;
+    stroke.color = Paint::linear(Point{210, 110}, Point{370, 180}, stops, PaintUnits::UserSpace);
+    page.addPath(pp, std::nullopt, stroke);
+    inl::emitParagraph(page, frag, WritingMode::HorizontalTb, Point{20, 50});
+
+    // --- ラスタ: 矩形の色が位置に応じて補間される ---
+    RasterRenderer r;
+    RasterOptions o;
+    o.dpi = 144.0f;
+    const Bitmap bmp = r.render(page, o);
+    REQUIRE(savePng(bmp, "build/grad_raster.png"));
+    const float s = 144.0f / 72.0f;
+    auto pixel = [&](float px, float py) {
+        return bmp.row(static_cast<int>(py * s))[static_cast<int>(px * s)];
+    };
+    const uint32_t left = pixel(25.0f, 145.0f);
+    const uint32_t mid = pixel(100.0f, 145.0f);
+    const uint32_t right = pixel(175.0f, 145.0f);
+    auto red = [](uint32_t p) { return static_cast<int>((p >> 16) & 0xFF); };
+    auto blue = [](uint32_t p) { return static_cast<int>(p & 0xFF); };
+    CHECK(red(left) > 200);
+    CHECK(blue(left) < 60);
+    CHECK(blue(right) > 200);
+    CHECK(red(right) < 60);
+    // 中央はおよそ半分ずつ
+    CHECK(red(mid) > 100);
+    CHECK(red(mid) < 160);
+    CHECK(blue(mid) > 100);
+    CHECK(blue(mid) < 160);
+    // 単調に変化する
+    CHECK(red(left) > red(mid));
+    CHECK(red(mid) > red(right));
+
+    // グリフもグラデーションで塗られる（見出しの左端は赤寄り、右端は青寄り）
+    int leftRed = 0, rightBlue = 0;
+    for (int y = static_cast<int>(20 * s); y < static_cast<int>(60 * s); ++y) {
+        for (int x = static_cast<int>(20 * s); x < static_cast<int>(70 * s); ++x) {
+            const uint32_t p = bmp.row(y)[x];
+            if (red(p) > 150 && blue(p) < 100) ++leftRed;
+        }
+        for (int x = static_cast<int>(250 * s); x < static_cast<int>(340 * s); ++x) {
+            const uint32_t p = bmp.row(y)[x];
+            if (blue(p) > 120 && red(p) < 120) ++rightBlue;
+        }
+    }
+    CHECK(leftRed > 20);
+    CHECK(rightBlue > 20);
+
+    // --- PDF: シェーディングパターンが入る ---
+    PdfWriter pdf;
+    pdf.setCompressStreams(false);      // 中身を検査するため
+    pdf.addPage(page);
+    REQUIRE(pdf.save("build/grad.pdf"));
+    CHECK(pdf.warnings().empty());
+    {
+        std::ifstream in("build/grad.pdf", std::ios::binary);
+        const std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        CHECK(bytes.find("/PatternType 2") != std::string::npos);
+        CHECK(bytes.find("/ShadingType 2") != std::string::npos);
+        CHECK(bytes.find("/Pattern cs") != std::string::npos);   // 塗り
+        CHECK(bytes.find("/Pattern CS") != std::string::npos);   // 縁取り
+        CHECK(bytes.find("/FunctionType 3") != std::string::npos);
+    }
+
+    // --- SVG: linearGradient と、グリフをクリップした矩形 ---
+    REQUIRE(saveSvg(page, "build/grad.svg"));
+    {
+        const std::string svg = writeSvg(page);
+        CHECK(svg.find("<linearGradient") != std::string::npos);
+        CHECK(svg.find("gradientUnits=\"userSpaceOnUse\"") != std::string::npos);
+        CHECK(svg.find("clip-path=\"url(#gc") != std::string::npos);
+        size_t grads = 0;
+        for (size_t p = svg.find("<linearGradient"); p != std::string::npos;
+             p = svg.find("<linearGradient", p + 1)) ++grads;
+        // 矩形の塗り・パスの縁取り・グリフ（欧文と和文で face が変わるので run は 2 つ）
+        CHECK(grads == 4);
+    }
+}
+
+TEST_CASE("antialias off renders binary coverage (no intermediate greys)") {
+    font::FontSet fonts;
+    if (!fonts.loadFile("data/NotoSerif-Regular.ttf", "serif")) { MESSAGE("fonts not found; skipping"); return; }
+    TextStyle st;
+    st.font.family = {"serif"};
+    st.size = 18.0f;
+    inl::Paragraph para = inl::Paragraph::plain(u"Ag", st);
+    inl::ParagraphLayouter layouter(fonts);
+    const inl::ConstantLineShape shape(200.0f);
+    const inl::ParagraphFragment frag = layouter.layout(para, WritingMode::HorizontalTb, shape);
+    dl::DisplayList list;
+    list.page = Size{80, 40};
+    // 斜めの辺を持つ図形も入れる（矩形の塗りと 2 値化の両方を見る）
+    Path tri;
+    tri.moveTo(5, 35);
+    tri.lineTo(30, 5);
+    tri.lineTo(55, 35);
+    tri.close();
+    list.addPath(tri, Color::rgb(0, 0, 0));
+    inl::emitParagraph(list, frag, WritingMode::HorizontalTb, Point{5, 20});
+
+    RasterOptions aa;
+    aa.dpi = 72.0f;
+    RasterOptions bin = aa;
+    bin.antialias = false;
+    const Bitmap a = RasterRenderer().render(list, aa);
+    const Bitmap b = RasterRenderer().render(list, bin);
+
+    auto greys = [](const Bitmap& bmp) {
+        size_t n = 0;
+        for (int y = 0; y < bmp.height; ++y) {
+            for (int x = 0; x < bmp.width; ++x) {
+                const int v = static_cast<int>(bmp.row(y)[x] & 0xFF);
+                if (v != 0 && v != 255) ++n;
+            }
+        }
+        return n;
+    };
+    CHECK(greys(a) > 50);      // AA あり: 中間調が出る
+    CHECK(greys(b) == 0);      // AA なし: 白と黒だけ
+    // インクの総量は大きく変わらない（形は保たれる）
+    auto ink = [](const Bitmap& bmp) {
+        size_t n = 0;
+        for (int y = 0; y < bmp.height; ++y) {
+            for (int x = 0; x < bmp.width; ++x) if ((bmp.row(y)[x] & 0xFF) < 128) ++n;
+        }
+        return n;
+    };
+    const double ia = static_cast<double>(ink(a));
+    const double ib = static_cast<double>(ink(b));
+    CHECK(ib > ia * 0.85);
+    CHECK(ib < ia * 1.15);
 }

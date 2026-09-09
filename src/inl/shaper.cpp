@@ -24,6 +24,7 @@ struct Segment {
     bool upright = true;
     uint32_t styleIndex = 0;
     uint8_t level = 0;      ///< UAX #9 の埋め込みレベル
+    bool monochrome = false;///< カラーフォントでもアウトラインで描く
 };
 
 /**
@@ -63,6 +64,26 @@ bool isEmojiExtender(char32_t cp) {
            (cp >= 0x1F3FB && cp <= 0x1F3FF) || (cp >= 0xE0020 && cp <= 0xE007F);
 }
 
+/// この位置の文字に付いた異体字セレクタ（VS15 → -1 = 字形、VS16 → +1 = 絵文字、無ければ 0）
+int variationSelectorAt(const std::u16string& text, size_t after) {
+    if (after >= text.size()) return 0;
+    size_t len = 1;
+    const char32_t cp = text::codePointAt(text, after, len);
+    if (cp == 0xFE0E) return -1;
+    if (cp == 0xFE0F) return 1;
+    return 0;
+}
+
+/// この文字を絵文字として組むときの色の好み（1 = カラー、-1 = モノクロ、0 = 指定なし）
+int colorPreferenceFor(EmojiPresentation pres, int vs) {
+    if (vs != 0) return vs;                 // 異体字セレクタが最優先
+    switch (pres) {
+    case EmojiPresentation::Text:  return -1;
+    case EmojiPresentation::Emoji: return 1;
+    default:                       return 0;
+    }
+}
+
 bool resolveUpright(WritingMode wm, TextOrientation ori, char32_t cp) {
     if (!isVertical(wm)) return true;
     switch (ori) {
@@ -91,14 +112,19 @@ std::vector<Segment> itemize(const std::u16string& text, const std::vector<Style
                 i += len;
                 continue;
             }
-            auto face = ctx.fonts.resolve(style.font, cp, style.language);
+            const int vs = variationSelectorAt(text, i + len);
+            const int colorPref = colorPreferenceFor(style.emojiPresentation, vs);
+            auto face = ctx.fonts.resolve(style.font, cp, style.language, colorPref);
+            // カラーフォントしか無いのに字形が要求されたら、アウトラインで描く（COLR / sbix はベースのアウトラインを持つ）
+            const bool monochrome = colorPref < 0 && face && face->descriptor().color;
             const bool upright = resolveUpright(ctx.writingMode, ori, cp);
             // 正立の縦組みは上から下へ論理順に置くので双方向の並べ替えをしない（CSS の upright と同じ）
             const uint8_t level = (vertical && upright) ? 0 : (i < levels.size() ? levels[i] : 0);
             if (!segs.empty()) {
                 Segment& last = segs.back();
                 if (last.end == i && last.face == face && last.upright == upright &&
-                    last.styleIndex == run.styleIndex && last.level == level) {
+                    last.styleIndex == run.styleIndex && last.level == level &&
+                    last.monochrome == monochrome) {
                     last.end = i + len;
                     i += len;
                     continue;
@@ -108,6 +134,7 @@ std::vector<Segment> itemize(const std::u16string& text, const std::vector<Style
             s.start = i;
             s.end = i + len;
             s.level = level;
+            s.monochrome = monochrome;
             s.face = face;
             s.upright = upright;
             s.styleIndex = run.styleIndex;
@@ -288,7 +315,7 @@ ShapedText shapeText(const std::u16string& text, const std::vector<StyleRun>& ru
         hb_buffer_guess_segment_properties(buffer);
         // カラー絵文字フォントの正立セグメントは横方向でシェイプする（HarfBuzz は縦方向で ZWJ シーケンスや
         // 国旗の結合を作れない）。置くときに列の中心へ正立で置く
-        const bool emojiUpright = vertical && seg.upright && seg.face->descriptor().color;
+        const bool emojiUpright = vertical && seg.upright && seg.face->descriptor().color && !seg.monochrome;
         const bool rtl = (seg.level & 1) != 0;
         hb_buffer_set_direction(buffer, (vertical && seg.upright && !emojiUpright) ? HB_DIRECTION_TTB
                                                                                    : (rtl ? HB_DIRECTION_RTL : HB_DIRECTION_LTR));
@@ -355,6 +382,7 @@ ShapedText shapeText(const std::u16string& text, const std::vector<StyleRun>& ru
                 g.xform = xform;
                 g.embolden = embolden;
                 g.styleIndex = seg.styleIndex;
+                g.monochrome = seg.monochrome;
 
                 const float xo = pos[k].x_offset * s;
                 const float yo = pos[k].y_offset * s;

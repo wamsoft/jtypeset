@@ -103,7 +103,8 @@ public:
      * どれも持たなければ最初に見つかった face（.notdef が出る）。1 つも解決できなければ nullptr
      */
     std::shared_ptr<glyphware::Face> resolve(const FontSpec& spec, char32_t cp,
-                                             const std::string& language = std::string());
+                                             const std::string& language = std::string(),
+                                             int colorPreference = 0);
 
     /// FontSpec の第一候補（行のメトリクス基準に使う。言語の置換は見ない）
     std::shared_ptr<glyphware::Face> primary(const FontSpec& spec);

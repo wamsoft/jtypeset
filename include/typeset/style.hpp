@@ -36,14 +36,14 @@ struct FontSpec {
  * fill（塗り）と stroke（縁取り）で描く。塗りだけ／縁取りだけの層も作れる（二重縁取り = 太い縁取りの層＋細い縁取りの層＋塗りの層）
  */
 struct TextLayer {
-    std::optional<Color> fill;
+    std::optional<Paint> fill;
     std::optional<Stroke> stroke;
     /// ずらし（pt、物理座標。右・下が正。縦組みでも同じ向き）
     Point offset;
     /// ぼかし半径（pt）。ラスタと SVG はガウスぼかし、PDF はぼかさずに置く
     Pt blur = 0.0f;
 
-    static TextLayer filled(Color c) { TextLayer l; l.fill = c; return l; }
+    static TextLayer filled(Paint c) { TextLayer l; l.fill = std::move(c); return l; }
     static TextLayer outlined(Stroke s) { TextLayer l; l.stroke = s; return l; }
 };
 
@@ -64,11 +64,19 @@ struct TextShadow {
  * 太さ・位置はフォントのメトリクスから取り、無ければ size の 1/20・1/10 を使う
  */
 struct TextDecoration {
-    std::optional<Color> color;     ///< 無ければ TextStyle::fill
+    std::optional<Paint> color;     ///< 無ければ TextStyle::fill
     Pt thickness = 0.0f;            ///< 0 でフォントのメトリクス
     /// 位置の補正（em）。文字から離れる向きが正（横組み: 下、縦組み: 右）
     float offset = 0.0f;
 };
+
+/**
+ * 絵文字の表示形式
+ *  - Auto: 異体字セレクタ（VS15 = U+FE0E で字形、VS16 = U+FE0F で絵文字）に従い、無ければフォントの解決順のまま
+ *  - Text: モノクロの字形を優先する（カラーフォントは最後に回し、選ばれてもカラーでは描かない）
+ *  - Emoji: カラー絵文字を優先する
+ */
+enum class EmojiPresentation : uint8_t { Auto, Text, Emoji };
 
 /**
  * 文字スタイル
@@ -76,7 +84,7 @@ struct TextDecoration {
 struct TextStyle {
     FontSpec font;
     Pt size = 10.0f;
-    Color fill{0, 0, 0, 255};
+    Paint fill{Color{0, 0, 0, 255}};        ///< 塗り（単色またはグラデーション）
     std::optional<Stroke> stroke;           ///< 縁取り
 
     /// 影。layers の下に 1 層足す
@@ -107,6 +115,9 @@ struct TextStyle {
 
     /// BCP47（シェイピングの言語タグ。"ja" で日本語字形が選ばれる）
     std::string language = "ja";
+
+    /// 絵文字の表示形式（既定は異体字セレクタに従う）
+    EmojiPresentation emojiPresentation = EmojiPresentation::Auto;
 
     /// OpenType feature（HarfBuzz の書式: "palt" "+liga" "-kern" "liga=0" "ss01"）。そのまま HarfBuzz へ渡す。
     /// palt / halt / pwid / hwid など字幅を変える feature を有効にした文字は、JLReq の約物の詰め（仮想ボディの
@@ -262,6 +273,9 @@ struct ParagraphStyle {
     bool preserveSpaces = false;
     /// preserveSpaces のとき、タブを何桁ごとのタブ位置で空白に展開するか
     int tabWidth = 4;
+
+    /// 段落全体の回転（度。時計回りが正。行頭（emitParagraph の origin）を中心に回す）
+    float rotation = 0.0f;
 
     /// 実効の行送り
     Pt resolvedLinePitch(Pt fontSize) const {

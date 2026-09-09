@@ -335,8 +335,9 @@ std::vector<std::string> FontSet::languageFonts(const std::string& language) con
 }
 
 std::shared_ptr<glyphware::Face> FontSet::resolve(const FontSpec& spec, char32_t cp,
-                                                  const std::string& language) {
+                                                  const std::string& language, int colorPreference) {
     std::shared_ptr<glyphware::Face> first;
+    std::shared_ptr<glyphware::Face> secondChoice;   // 色の好みに合わないが cp を持つ face
     auto tryName = [&](const std::string& name) -> std::shared_ptr<glyphware::Face> {
         // 同じ名前の登録を近い順に見て、cp を持つ最初のものを返す。カバレッジは宣言の ranges があれば開かずに判定
         std::vector<Entry*> seen;
@@ -352,7 +353,19 @@ std::shared_ptr<glyphware::Face> FontSet::resolve(const FontSpec& spec, char32_t
             }
             if (!e) return nullptr;
             seen.push_back(e);
-            if (covers(*e, cp)) return withVariations(e->face, spec.weight, spec.italic, spec.variations);
+            if (covers(*e, cp)) {
+                auto face = withVariations(e->face, spec.weight, spec.italic, spec.variations);
+                // 絵文字の表示形式: カラーフォントを優先／後回しにする（好みに合わなければ控えて次の family へ）
+                if (colorPreference != 0) {
+                    const bool color = face->descriptor().color;
+                    const bool wanted = colorPreference > 0;
+                    if (color != wanted) {
+                        if (!secondChoice) secondChoice = face;
+                        continue;
+                    }
+                }
+                return face;
+            }
             if (!first && e->face) first = withVariations(e->face, spec.weight, spec.italic, spec.variations);
         }
     };
@@ -362,6 +375,7 @@ std::shared_ptr<glyphware::Face> FontSet::resolve(const FontSpec& spec, char32_t
     for (const std::string& name : spec.family) {
         if (auto face = tryName(name)) return face;
     }
+    if (secondChoice) return secondChoice;
     if (first) return first;
     // どの名前も無い: 開けるものの先頭
     for (auto& up : entries_) {

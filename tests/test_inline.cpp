@@ -370,7 +370,7 @@ TEST_CASE("emoji: color layers are emitted as filled paths and ZWJ sequences sta
         int colored = 0, glyphRuns = 0;
         for (const dl::Item& item : out.items) {
             if (const auto* pi = std::get_if<dl::PathItem>(&item)) {
-                if (pi->fill && (pi->fill->r != pi->fill->g || pi->fill->g != pi->fill->b)) ++colored;
+                if (pi->fill && (pi->fill->solid().r != pi->fill->solid().g || pi->fill->solid().g != pi->fill->solid().b)) ++colored;
             } else if (std::get_if<dl::GlyphRun>(&item)) {
                 ++glyphRuns;
             }
@@ -1600,4 +1600,99 @@ TEST_CASE("ruby and emphasis offset move the annotation away from the parent cha
         return top;
     };
     CHECK(emphasisBlock(0.2f) == doctest::Approx(emphasisBlock(0.0f) - 2.0f));
+}
+
+TEST_CASE("emoji presentation: VS15 / Text draws an outline, VS16 / Emoji picks the color font") {
+    font::FontSet fonts;
+    auto latin = fonts.loadFile("data/NotoSerif-Regular.ttf", "serif");
+    auto emoji = fonts.loadFile("data/Noto-COLRv1.ttf", "emoji");
+    if (!latin || !emoji) { MESSAGE("fonts not found; skipping"); return; }
+    // ☎ U+260E は欧文フォントにも絵文字フォントにもある（既定は字形、VS16 で絵文字）
+    const char32_t cp = 0x260E;
+    if (!latin->covers(cp) || !emoji->covers(cp)) { MESSAGE("phone glyph not in both fonts; skipping"); return; }
+
+    TextStyle st;
+    st.font.family = {"serif", "emoji"};
+    st.size = 20.0f;
+    inl::ParagraphLayouter layouter(fonts);
+    const inl::ConstantLineShape shape(200.0f);
+
+    auto faceOf = [&](const std::u16string& text, EmojiPresentation pres) {
+        TextStyle s = st;
+        s.emojiPresentation = pres;
+        const inl::ShapedText sh = inl::shapeText(text, s, fonts, WritingMode::HorizontalTb);
+        REQUIRE(!sh.glyphs.empty());
+        return sh.glyphs[0].face;
+    };
+    // 既定は family の順（serif が先）
+    CHECK((faceOf(u"\u260E", EmojiPresentation::Auto) == latin));
+    // VS16 でカラー、VS15 で字形
+    CHECK((faceOf(u"\u260E\uFE0F", EmojiPresentation::Auto) == emoji));
+    CHECK((faceOf(u"\u260E\uFE0E", EmojiPresentation::Auto) == latin));
+    // スタイルでの指定
+    CHECK((faceOf(u"\u260E", EmojiPresentation::Emoji) == emoji));
+    CHECK((faceOf(u"\u260E", EmojiPresentation::Text) == latin));
+
+    // カラーフォントしか無い絵文字を Text で指定すると、カラーの層ではなくアウトラインで描く
+    TextStyle only = st;
+    only.font.family = {"emoji"};
+    only.emojiPresentation = EmojiPresentation::Text;
+    inl::Paragraph p = inl::Paragraph::plain(u"\U0001F600", only);
+    const inl::ParagraphFragment f = layouter.layout(p, WritingMode::HorizontalTb, shape);
+    REQUIRE(!f.lines.empty());
+    REQUIRE(!f.lines[0].glyphs.empty());
+    CHECK(f.lines[0].glyphs[0].monochrome);
+    dl::DisplayList out;
+    inl::emitParagraph(out, f, WritingMode::HorizontalTb, Point{0, 20});
+    size_t runs = 0, paths = 0;
+    for (const dl::Item& item : out.items) {
+        if (std::holds_alternative<dl::GlyphRun>(item)) ++runs;
+        if (std::holds_alternative<dl::PathItem>(item)) ++paths;
+        if (const auto* g = std::get_if<dl::Group>(&item)) paths += g->children.size();
+    }
+    CHECK(runs == 1);       // 普通のグリフとして 1 run
+    CHECK(paths == 0);      // カラーの層は出ない
+    // Emoji 指定ならカラーの層（Group / Path）になる
+    only.emojiPresentation = EmojiPresentation::Emoji;
+    inl::Paragraph q = inl::Paragraph::plain(u"\U0001F600", only);
+    const inl::ParagraphFragment fq = layouter.layout(q, WritingMode::HorizontalTb, shape);
+    dl::DisplayList outq;
+    inl::emitParagraph(outq, fq, WritingMode::HorizontalTb, Point{0, 20});
+    size_t colorItems = 0;
+    for (const dl::Item& item : outq.items) {
+        if (!std::holds_alternative<dl::GlyphRun>(item)) ++colorItems;
+    }
+    CHECK(colorItems > 0);
+}
+
+TEST_CASE("paragraph rotation wraps the output in a rotated group") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+    inl::ParagraphLayouter layouter(fx.fonts);
+    const inl::ConstantLineShape shape(200.0f);
+    inl::Paragraph p = inl::Paragraph::plain(u"回転する段落", fx.style(10.0f));
+    p.style.rotation = 90.0f;
+    const inl::ParagraphFragment f = layouter.layout(p, WritingMode::HorizontalTb, shape);
+    CHECK(f.rotation == doctest::Approx(90.0f));
+
+    dl::DisplayList out;
+    const Point origin{100.0f, 50.0f};
+    inl::emitParagraph(out, f, WritingMode::HorizontalTb, origin);
+    REQUIRE(out.items.size() == 1);
+    const auto* grp = std::get_if<dl::Group>(&out.items[0]);
+    REQUIRE(grp != nullptr);
+    CHECK(!grp->children.empty());
+    // origin を中心に時計回り 90 度: 行頭から送り方向へ進むと y が増える
+    const Point a = grp->xform.apply(Point{0.0f, 0.0f});
+    const Point b = grp->xform.apply(Point{10.0f, 0.0f});
+    CHECK(a.x == doctest::Approx(origin.x));
+    CHECK(a.y == doctest::Approx(origin.y));
+    CHECK(b.x == doctest::Approx(origin.x).epsilon(0.01));
+    CHECK(b.y == doctest::Approx(origin.y + 10.0f));
+    // 回転が無ければ Group で包まない
+    p.style.rotation = 0.0f;
+    const inl::ParagraphFragment f0 = layouter.layout(p, WritingMode::HorizontalTb, shape);
+    dl::DisplayList out0;
+    inl::emitParagraph(out0, f0, WritingMode::HorizontalTb, origin);
+    CHECK(!std::holds_alternative<dl::Group>(out0.items[0]));
 }

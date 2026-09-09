@@ -62,6 +62,19 @@ void accumulate(const std::vector<Item>& items, const Matrix& ctm, Rect& acc) {
 
 } // namespace
 
+Rect runBounds(const GlyphRun& run) {
+    if (run.glyphs.empty()) return Rect{};
+    float x0 = 1e30f, y0 = 1e30f, x1 = -1e30f, y1 = -1e30f;
+    for (const Glyph& g : run.glyphs) {
+        // em box（ペン原点の上 1em × 幅 1em）で概算
+        x0 = std::min(x0, g.pos.x);
+        y0 = std::min(y0, g.pos.y - run.size);
+        x1 = std::max(x1, g.pos.x + run.size);
+        y1 = std::max(y1, g.pos.y);
+    }
+    return Rect{x0, y0, x1 - x0, y1 - y0};
+}
+
 Rect bounds(const DisplayList& list) {
     Rect acc;
     accumulate(list.items, Matrix::identity(), acc);

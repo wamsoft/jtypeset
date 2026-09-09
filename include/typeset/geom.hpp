@@ -1,6 +1,8 @@
 #ifndef TYPESET_GEOM_HPP
 #define TYPESET_GEOM_HPP
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <vector>
 
@@ -71,6 +73,14 @@ struct Matrix {
     static Matrix translation(Pt tx, Pt ty) {
         Matrix m; m.dx = tx; m.dy = ty; return m;
     }
+    /// 回転（ラジアン。y-down なので画面上では時計回りが正）
+    static Matrix rotation(float radians) {
+        const float c = std::cos(radians), s = std::sin(radians);
+        Matrix m;
+        m.xx = c; m.xy = -s;
+        m.yx = s; m.yy = c;
+        return m;
+    }
     static Matrix scaling(float sx, float sy) {
         Matrix m; m.xx = sx; m.yy = sy; return m;
     }
@@ -121,6 +131,103 @@ struct Color {
     bool operator!=(const Color& o) const { return !(*this == o); }
 };
 
+/**
+ * グラデーションの停止点
+ */
+struct GradientStop {
+    float offset = 0.0f;    ///< 0〜1
+    Color color;
+    bool operator==(const GradientStop& o) const { return offset == o.offset && color == o.color; }
+};
+
+enum class PaintKind : uint8_t { Solid, Linear, Radial };
+
+/**
+ * グラデーションの座標系
+ *  - BoundingBox: 描く対象（GlyphRun なら run 全体、PathItem ならパス）の外接矩形を 0〜1 に正規化した座標
+ *  - UserSpace: ページ座標（pt、y-down）
+ */
+enum class PaintUnits : uint8_t { BoundingBox, UserSpace };
+
+/**
+ * 塗り — 単色または線形／放射グラデーション
+ *
+ * Color から暗黙に作れるので、単色のときは今までどおり色を代入すればよい。
+ * PDF は停止点ごとの不透明度を持てないので、最大の不透明度を全体に掛ける（ラスタ・SVG は停止点ごと）
+ */
+struct Paint {
+    PaintKind kind = PaintKind::Solid;
+    Color color{0, 0, 0, 255};              ///< Solid のときの色
+    PaintUnits units = PaintUnits::BoundingBox;
+    Point start;                            ///< Linear: 始点／Radial: 中心
+    Point end{1.0f, 0.0f};                  ///< Linear: 終点
+    float radius = 0.5f;                    ///< Radial: 半径
+    std::vector<GradientStop> stops;        ///< offset の昇順
+
+    Paint() = default;
+    Paint(Color c) : color(c) {}            // 単色は暗黙変換
+
+    static Paint linear(Point from, Point to, std::vector<GradientStop> stops,
+                        PaintUnits units = PaintUnits::BoundingBox) {
+        Paint p;
+        p.kind = PaintKind::Linear;
+        p.start = from;
+        p.end = to;
+        p.stops = std::move(stops);
+        p.units = units;
+        return p;
+    }
+    static Paint radial(Point center, float radius, std::vector<GradientStop> stops,
+                        PaintUnits units = PaintUnits::BoundingBox) {
+        Paint p;
+        p.kind = PaintKind::Radial;
+        p.start = center;
+        p.radius = radius;
+        p.stops = std::move(stops);
+        p.units = units;
+        return p;
+    }
+
+    bool isGradient() const { return kind != PaintKind::Solid && stops.size() >= 2; }
+
+    /// t（0〜1）の色。停止点の間を線形補間する
+    Color at(float t) const {
+        if (stops.empty()) return color;
+        if (t <= stops.front().offset) return stops.front().color;
+        if (t >= stops.back().offset) return stops.back().color;
+        for (size_t i = 1; i < stops.size(); ++i) {
+            if (t > stops[i].offset) continue;
+            const GradientStop& a = stops[i - 1];
+            const GradientStop& b = stops[i];
+            const float span = b.offset - a.offset;
+            const float u = span > 0.0f ? (t - a.offset) / span : 0.0f;
+            auto mix = [&](uint8_t x, uint8_t y) {
+                return static_cast<uint8_t>(x + (static_cast<float>(y) - x) * u + 0.5f);
+            };
+            return Color{mix(a.color.r, b.color.r), mix(a.color.g, b.color.g),
+                         mix(a.color.b, b.color.b), mix(a.color.a, b.color.a)};
+        }
+        return stops.back().color;
+    }
+
+    /// 単色として扱うときの色（グラデーションは中間の色）
+    Color solid() const { return isGradient() ? at(0.5f) : color; }
+    /// 不透明度の代表値（グラデーションは最大）
+    uint8_t maxAlpha() const {
+        if (!isGradient()) return color.a;
+        uint8_t a = 0;
+        for (const GradientStop& s : stops) a = std::max(a, s.color.a);
+        return a;
+    }
+
+    bool operator==(const Paint& o) const {
+        return kind == o.kind && color == o.color && units == o.units &&
+               start.x == o.start.x && start.y == o.start.y && end.x == o.end.x && end.y == o.end.y &&
+               radius == o.radius && stops == o.stops;
+    }
+    bool operator!=(const Paint& o) const { return !(*this == o); }
+};
+
 enum class StrokeJoin : uint8_t { Miter, Round, Bevel };
 enum class StrokeCap : uint8_t { Butt, Round, Square };
 
@@ -128,7 +235,7 @@ enum class StrokeCap : uint8_t { Butt, Round, Square };
  * 線の描き方
  */
 struct Stroke {
-    Color color;
+    Paint color;            ///< 線の塗り（単色または グラデーション。Color から暗黙に作れる）
     Pt width = 1.0f;
     StrokeJoin join = StrokeJoin::Miter;
     StrokeCap cap = StrokeCap::Butt;

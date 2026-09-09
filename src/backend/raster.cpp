@@ -34,9 +34,66 @@ struct Target {
     int width = 0, height = 0, stride = 0;
     // クリップ（ピクセル、[x0,x1)×[y0,y1)）
     int cx0 = 0, cy0 = 0, cx1 = 0, cy1 = 0;
+    // 2 値化の閾値（0 なら AA のまま）。カバレッジをこの値で 0 / 255 に丸める
+    uint32_t threshold = 0;
+
+    /// カバレッジを実効値に（2 値化のときは 0 か 255）
+    uint32_t coverage(uint32_t cov) const {
+        if (threshold == 0) return cov;
+        return cov >= threshold ? 255u : 0u;
+    }
 
     uint32_t* row(int y) const { return pixels + static_cast<ptrdiff_t>(stride) * y; }
 };
+
+/**
+ * 塗りの評価器 — デバイス画素 → 色
+ *
+ * 単色ならその色を返すだけ。グラデーションは画素の中心を「塗りの座標系」へ写して t を求め、停止点を補間する。
+ * BoundingBox 単位なら対象の外接矩形（デバイス座標）を 0〜1 に、UserSpace ならページ座標へ写す
+ */
+struct PaintSampler {
+    const Paint* paint = nullptr;
+    Color solid;
+    Matrix toPaint;
+    bool gradient = false;
+
+    Color at(int x, int y) const {
+        if (!gradient) return solid;
+        const Point p = toPaint.apply(Point{static_cast<float>(x) + 0.5f, static_cast<float>(y) + 0.5f});
+        float t = 0.0f;
+        if (paint->kind == PaintKind::Radial) {
+            const float dx = p.x - paint->start.x;
+            const float dy = p.y - paint->start.y;
+            t = paint->radius > 0.0f ? std::sqrt(dx * dx + dy * dy) / paint->radius : 0.0f;
+        } else {
+            const float ex = paint->end.x - paint->start.x;
+            const float ey = paint->end.y - paint->start.y;
+            const float len2 = ex * ex + ey * ey;
+            t = len2 > 0.0f ? ((p.x - paint->start.x) * ex + (p.y - paint->start.y) * ey) / len2 : 0.0f;
+        }
+        return paint->at(std::min(1.0f, std::max(0.0f, t)));
+    }
+};
+
+PaintSampler makeSampler(const Paint& paint, const Rect& deviceBox, const Matrix& ctm) {
+    PaintSampler s;
+    s.solid = paint.solid();
+    if (!paint.isGradient()) return s;
+    s.paint = &paint;
+    s.gradient = true;
+    if (paint.units == PaintUnits::UserSpace) {
+        bool ok = false;
+        s.toPaint = invert(ctm, &ok);
+        if (!ok) { s.gradient = false; return s; }
+    } else {
+        const float w = deviceBox.w > 1e-6f ? deviceBox.w : 1.0f;
+        const float h = deviceBox.h > 1e-6f ? deviceBox.h : 1.0f;
+        s.toPaint = multiply(Matrix::scaling(1.0f / w, 1.0f / h),
+                             Matrix::translation(-deviceBox.x, -deviceBox.y));
+    }
+    return s;
+}
 
 inline uint32_t pack(uint32_t a, uint32_t r, uint32_t g, uint32_t b) {
     return (a << 24) | (r << 16) | (g << 8) | b;
@@ -68,6 +125,33 @@ inline uint32_t effectiveAlpha(Color c, float opacity) {
 }
 
 /// 8bit カバレッジマスクを単色で合成
+/// 塗りの評価器で合成する（グラデーション対応）。opacity は 0〜1
+void blendMaskPaint(const Target& t, const uint8_t* mask, int maskW, int maskH, int pitch,
+                    int originX, int originY, const PaintSampler& s, float opacity) {
+    if (!mask || maskW <= 0 || maskH <= 0 || opacity <= 0.0f) return;
+    const int sy0 = std::max(0, t.cy0 - originY);
+    const int sy1 = std::min(maskH, t.cy1 - originY);
+    const int sx0 = std::max(0, t.cx0 - originX);
+    const int sx1 = std::min(maskW, t.cx1 - originX);
+    if (sx0 >= sx1 || sy0 >= sy1) return;
+    const uint32_t opQ = static_cast<uint32_t>(opacity * 255.0f + 0.5f);
+
+    for (int my = sy0; my < sy1; ++my) {
+        const uint8_t* src = mask + static_cast<ptrdiff_t>(pitch) * my;
+        uint32_t* dst = t.row(originY + my);
+        for (int mx = sx0; mx < sx1; ++mx) {
+            const uint32_t cov = t.coverage(src[mx]);
+            if (!cov) continue;
+            const int px = originX + mx;
+            const int py = originY + my;
+            const Color c = s.at(px, py);
+            const uint32_t a = (c.a * opQ + 127) / 255;
+            if (!a) continue;
+            blendPixel(dst[px], c.r, c.g, c.b, (cov * a + 127) / 255);
+        }
+    }
+}
+
 void blendMask(const Target& t, const uint8_t* mask, int maskW, int maskH, int pitch,
                int originX, int originY, Color c, uint32_t alpha) {
     if (!mask || maskW <= 0 || maskH <= 0 || alpha == 0) return;
@@ -81,7 +165,7 @@ void blendMask(const Target& t, const uint8_t* mask, int maskW, int maskH, int p
         const uint8_t* src = mask + static_cast<ptrdiff_t>(pitch) * my;
         uint32_t* dst = t.row(originY + my);
         for (int mx = sx0; mx < sx1; ++mx) {
-            const uint32_t cov = src[mx];
+            const uint32_t cov = t.coverage(src[mx]);
             if (!cov) continue;
             blendPixel(dst[originX + mx], c.r, c.g, c.b, (cov * alpha + 127) / 255);
         }
@@ -109,8 +193,9 @@ void fillRectF(const Target& t, float x, float y, float w, float h, Color c, uin
             const float right = std::min(fx1, static_cast<float>(px + 1));
             const float covX = right - left;
             if (covX <= 0.0f) continue;
-            blendPixel(dst[px], c.r, c.g, c.b,
-                       static_cast<uint32_t>(alpha * covX * covY + 0.5f));
+            const uint32_t cov = t.coverage(static_cast<uint32_t>(covX * covY * 255.0f + 0.5f));
+            if (!cov) continue;
+            blendPixel(dst[px], c.r, c.g, c.b, (cov * alpha + 127) / 255);
         }
     }
 }
@@ -268,14 +353,14 @@ struct RasterRenderer::Impl {
      */
     void blendGlyph(Target& t, glyphware::Face& face, uint32_t gid, const Matrix& m,
                     float strokeWidth, StrokeJoin join, StrokeCap cap,
-                    Color color, uint32_t alpha, bool useCache);
+                    const PaintSampler& paint, float opacity, bool useCache);
 };
 
 void RasterRenderer::Impl::blendGlyph(Target& t, glyphware::Face& face, uint32_t gid,
                                       const Matrix& m, float strokeWidth,
                                       StrokeJoin join, StrokeCap cap,
-                                      Color color, uint32_t alpha, bool useCache) {
-    if (alpha == 0) return;
+                                      const PaintSampler& paint, float opacity, bool useCache) {
+    if (opacity <= 0.0f) return;
 
     // バックエンドは y-up で受け取るので y 行を反転して渡す。返るマスクは
     // (left, -top) を左上として y-down に並ぶ
@@ -293,8 +378,8 @@ void RasterRenderer::Impl::blendGlyph(Target& t, glyphware::Face& face, uint32_t
     if (!useCache) {
         glyphware::GlyphMask mask;
         if (!face.renderGlyphMask(gid, params, mask)) return;
-        blendMask(t, mask.buffer, mask.width, mask.rows, mask.pitch, mask.left, -mask.top,
-                  color, alpha);
+        blendMaskPaint(t, mask.buffer, mask.width, mask.rows, mask.pitch, mask.left, -mask.top,
+                       paint, opacity);
         return;
     }
 
@@ -343,7 +428,7 @@ void RasterRenderer::Impl::blendGlyph(Target& t, glyphware::Face& face, uint32_t
     if (cm.width <= 0 || cm.rows <= 0) return;
     const int ox = static_cast<int>(baseX) + cm.left;
     const int oy = -(static_cast<int>(baseY) + cm.top);
-    blendMask(t, cm.coverage.data(), cm.width, cm.rows, cm.width, ox, oy, color, alpha);
+    blendMaskPaint(t, cm.coverage.data(), cm.width, cm.rows, cm.width, ox, oy, paint, opacity);
 }
 
 namespace {
@@ -432,7 +517,7 @@ void RasterRenderer::Impl::drawBlurredGlyphRun(Target& t, const dl::GlyphRun& ru
     };
 
     // 塗りと縁取りを同じカバレッジへ集める（色は塗り優先。影は普通どちらか一方）
-    const Color color = run.fill ? *run.fill : run.stroke->color;
+    const Paint& paint = run.fill ? *run.fill : run.stroke->color;
     for (const dl::Glyph& g : run.glyphs) {
         Matrix m = multiply(Matrix::fromMat2(g.xform), base);
         m = multiply(Matrix::translation(g.pos.x, g.pos.y), m);
@@ -467,7 +552,9 @@ void RasterRenderer::Impl::drawBlurredGlyphRun(Target& t, const dl::GlyphRun& ru
         }
     }
     gaussianBlur(cov, w, h, sigma);
-    blendMask(t, cov.data(), w, h, w, x0, y0, color, effectiveAlpha(color, opacity));
+    const Rect deviceBox{static_cast<float>(x0), static_cast<float>(y0),
+                         static_cast<float>(w), static_cast<float>(h)};
+    blendMaskPaint(t, cov.data(), w, h, w, x0, y0, makeSampler(paint, deviceBox, ctm), opacity);
 }
 
 void RasterRenderer::Impl::drawGlyphRun(Target& t, const dl::GlyphRun& run, const Matrix& ctm,
@@ -487,24 +574,35 @@ void RasterRenderer::Impl::drawGlyphRun(Target& t, const dl::GlyphRun& run, cons
     // デバイスのスケール（線幅用）
     const float devScale = std::sqrt(std::fabs(ctm.determinant()));
 
+    // グラデーションの BoundingBox 座標は run 全体の外接矩形（デバイス）で決める
+    Rect deviceBox;
+    if ((run.fill && run.fill->isGradient()) || (run.stroke && run.stroke->color.isGradient())) {
+        const Rect b = dl::runBounds(run);
+        const Point p0 = ctm.apply(Point{b.x, b.y});
+        const Point p1 = ctm.apply(Point{b.right(), b.bottom()});
+        deviceBox = Rect{std::min(p0.x, p1.x), std::min(p0.y, p1.y),
+                         std::fabs(p1.x - p0.x), std::fabs(p1.y - p0.y)};
+    }
+    const PaintSampler fillPaint = run.fill ? makeSampler(*run.fill, deviceBox, ctm) : PaintSampler{};
+    const PaintSampler strokePaint = run.stroke ? makeSampler(run.stroke->color, deviceBox, ctm)
+                                                : PaintSampler{};
+
     for (const dl::Glyph& g : run.glyphs) {
         Matrix m = multiply(Matrix::fromMat2(g.xform), base);
         m = multiply(Matrix::translation(g.pos.x, g.pos.y), m);
         m = multiply(ctm, m);
 
         if (run.fill) {
-            const uint32_t a = effectiveAlpha(*run.fill, opacity);
             blendGlyph(t, face, g.gid, m, 0.0f, StrokeJoin::Round, StrokeCap::Round,
-                       *run.fill, a, useCache);
+                       fillPaint, opacity, useCache);
             if (run.embolden > 0.0f) {
                 blendGlyph(t, face, g.gid, m, run.embolden * devScale,
-                           StrokeJoin::Round, StrokeCap::Round, *run.fill, a, useCache);
+                           StrokeJoin::Round, StrokeCap::Round, fillPaint, opacity, useCache);
             }
         }
         if (run.stroke && run.stroke->width > 0.0f) {
-            const uint32_t a = effectiveAlpha(run.stroke->color, opacity);
             blendGlyph(t, face, g.gid, m, (run.stroke->width + run.embolden) * devScale,
-                       run.stroke->join, run.stroke->cap, run.stroke->color, a, useCache);
+                       run.stroke->join, run.stroke->cap, strokePaint, opacity, useCache);
         }
     }
 }
@@ -517,11 +615,17 @@ void RasterRenderer::Impl::drawPath(Target& t, const dl::PathItem& item, const M
     const auto polys = flattenPath(dev, 0.2f, &closed);
     if (polys.empty()) return;
 
+    // グラデーションの BoundingBox 座標はパスの外接矩形（デバイス）で決める
+    Rect deviceBox;
+    if ((item.fill && item.fill->isGradient()) || (item.stroke && item.stroke->color.isGradient())) {
+        deviceBox = dev.controlBounds();
+    }
+
     detail::Coverage cov;
     if (item.fill) {
         if (detail::rasterizePolygons(polys, item.evenOdd, t.width, t.height, cov)) {
-            blendMask(t, cov.a.data(), cov.width, cov.height, cov.width, cov.x0, cov.y0,
-                      *item.fill, effectiveAlpha(*item.fill, opacity));
+            blendMaskPaint(t, cov.a.data(), cov.width, cov.height, cov.width, cov.x0, cov.y0,
+                           makeSampler(*item.fill, deviceBox, ctm), opacity);
         }
     }
     if (item.stroke && item.stroke->width > 0.0f) {
@@ -529,20 +633,20 @@ void RasterRenderer::Impl::drawPath(Target& t, const dl::PathItem& item, const M
         const auto strokePolys = detail::strokeToPolygons(
             polys, closed, item.stroke->width * devScale, item.stroke->join, item.stroke->cap);
         if (detail::rasterizePolygons(strokePolys, false, t.width, t.height, cov)) {
-            blendMask(t, cov.a.data(), cov.width, cov.height, cov.width, cov.x0, cov.y0,
-                      item.stroke->color, effectiveAlpha(item.stroke->color, opacity));
+            blendMaskPaint(t, cov.a.data(), cov.width, cov.height, cov.width, cov.x0, cov.y0,
+                           makeSampler(item.stroke->color, deviceBox, ctm), opacity);
         }
     }
 }
 
 void RasterRenderer::Impl::drawRect(Target& t, const dl::RectItem& item, const Matrix& ctm,
                                     float opacity) {
-    if (ctm.xy == 0.0f && ctm.yx == 0.0f) {
+    if (ctm.xy == 0.0f && ctm.yx == 0.0f && !item.fill.isGradient()) {
         const Point a = ctm.apply({item.rect.x, item.rect.y});
         const Point b = ctm.apply({item.rect.right(), item.rect.bottom()});
         const float x0 = std::min(a.x, b.x), y0 = std::min(a.y, b.y);
-        fillRectF(t, x0, y0, std::fabs(b.x - a.x), std::fabs(b.y - a.y), item.fill,
-                  effectiveAlpha(item.fill, opacity));
+        fillRectF(t, x0, y0, std::fabs(b.x - a.x), std::fabs(b.y - a.y), item.fill.solid(),
+                  effectiveAlpha(item.fill.solid(), opacity));
         return;
     }
     dl::PathItem p;
@@ -608,7 +712,7 @@ void RasterRenderer::setCacheMaxBytes(size_t bytes) { impl_->cacheMax = bytes; }
 
 void RasterRenderer::render(const dl::DisplayList& list,
                             uint32_t* pixels, int width, int height, int stridePixels,
-                            const Matrix& toDevice, bool useCache) {
+                            const Matrix& toDevice, bool useCache, uint8_t alphaThreshold) {
     if (!pixels || width <= 0 || height <= 0) return;
     Target t;
     t.pixels = pixels;
@@ -616,6 +720,7 @@ void RasterRenderer::render(const dl::DisplayList& list,
     t.height = height;
     t.stride = stridePixels;
     t.cx0 = 0; t.cy0 = 0; t.cx1 = width; t.cy1 = height;
+    t.threshold = alphaThreshold;
     impl_->drawItems(t, list.items, toDevice, 1.0f, useCache);
 }
 
@@ -626,7 +731,8 @@ Bitmap RasterRenderer::render(const dl::DisplayList& list, const RasterOptions& 
     bmp.height = std::max(1, static_cast<int>(std::ceil(list.page.h * scale)));
     bmp.argb.assign(static_cast<size_t>(bmp.width) * bmp.height, opts.background.toArgb());
     render(list, bmp.argb.data(), bmp.width, bmp.height, bmp.width,
-           Matrix::scaling(scale, scale), opts.useCache);
+           Matrix::scaling(scale, scale), opts.useCache,
+           opts.antialias ? 0 : std::max<uint8_t>(1, opts.alphaThreshold));
     return bmp;
 }
 

@@ -112,9 +112,40 @@ Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
         .def_readwrite("g", &Color::g)
         .def_readwrite("b", &Color::b)
         .def_readwrite("a", &Color::a);
+    py::enum_<PaintKind>(m, "PaintKind", "塗りの種類")
+        .value("SOLID", PaintKind::Solid)
+        .value("LINEAR", PaintKind::Linear)
+        .value("RADIAL", PaintKind::Radial);
+    py::enum_<PaintUnits>(m, "PaintUnits",
+                          "グラデーションの座標系: BOUNDING_BOX（対象の外接矩形を 0〜1 に正規化）/ USER_SPACE（ページ座標 pt）")
+        .value("BOUNDING_BOX", PaintUnits::BoundingBox)
+        .value("USER_SPACE", PaintUnits::UserSpace);
+    py::class_<GradientStop>(m, "GradientStop", "グラデーションの停止点（0〜1 の位置と色）")
+        .def(py::init([](float offset, Color color) { return GradientStop{offset, color}; }),
+             py::arg("offset"), py::arg("color"))
+        .def_readwrite("offset", &GradientStop::offset)
+        .def_readwrite("color", &GradientStop::color);
+    py::class_<Paint>(m, "Paint",
+                      "塗り — 単色または線形／放射グラデーション。Color を渡せる所にはそのまま渡せる（単色）")
+        .def(py::init<>())
+        .def(py::init([](Color c) { return Paint(c); }), py::arg("color"))
+        .def_static("linear", &Paint::linear, py::arg("start"), py::arg("end"), py::arg("stops"),
+                    py::arg("units") = PaintUnits::BoundingBox, "線形グラデーション")
+        .def_static("radial", &Paint::radial, py::arg("center"), py::arg("radius"), py::arg("stops"),
+                    py::arg("units") = PaintUnits::BoundingBox, "放射グラデーション")
+        .def_readwrite("kind", &Paint::kind)
+        .def_readwrite("color", &Paint::color)
+        .def_readwrite("units", &Paint::units)
+        .def_readwrite("start", &Paint::start)
+        .def_readwrite("end", &Paint::end)
+        .def_readwrite("radius", &Paint::radius)
+        .def_readwrite("stops", &Paint::stops, "停止点のリスト（コピーを返すので作って代入する）")
+        .def("is_gradient", &Paint::isGradient)
+        .def("solid", &Paint::solid, "単色として扱うときの色");
+    py::implicitly_convertible<Color, Paint>();
     py::class_<Stroke>(m, "Stroke", "線の描き方（色・幅・端・角）")
         .def(py::init<>())
-        .def(py::init([](Color c, Pt w) { Stroke s; s.color = c; s.width = w; return s; }),
+        .def(py::init([](Paint c, Pt w) { Stroke s; s.color = std::move(c); s.width = w; return s; }),
              py::arg("color"), py::arg("width") = 1.0f)
         .def_readwrite("color", &Stroke::color)
         .def_readwrite("width", &Stroke::width);
@@ -159,6 +190,11 @@ Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
         .value("MIXED", TextOrientation::Mixed)
         .value("UPRIGHT", TextOrientation::Upright)
         .value("SIDEWAYS", TextOrientation::Sideways);
+    py::enum_<EmojiPresentation>(m, "EmojiPresentation",
+                                 "絵文字の表示形式: AUTO（異体字セレクタに従う）/ TEXT（モノクロの字形）/ EMOJI（カラー）")
+        .value("AUTO", EmojiPresentation::Auto)
+        .value("TEXT", EmojiPresentation::Text)
+        .value("EMOJI", EmojiPresentation::Emoji);
     py::enum_<WrapMode>(m, "WrapMode",
                         "折返しの方式: MIXED（和文は字ごと・欧文は語ごと）/ CHAR（欧文の語中でも切る）/ "
                         "WORD（和文も語でだけ切る）/ NONE（折り返さない）")
@@ -280,10 +316,10 @@ Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
 
     py::class_<TextStyle>(m, "TextStyle", "文字スタイル: フォント・サイズ・色・縁取り・影・層・下線・打消し線・字間・向き・平体長体・合成ボールド／斜体・ベースラインのずらし")
         .def(py::init<>())
-        .def(py::init([](std::vector<std::string> family, Pt size, Color fill) {
-                 TextStyle s; s.font.family = std::move(family); s.size = size; s.fill = fill; return s;
+        .def(py::init([](std::vector<std::string> family, Pt size, Paint fill) {
+                 TextStyle s; s.font.family = std::move(family); s.size = size; s.fill = std::move(fill); return s;
              }),
-             py::arg("family"), py::arg("size") = 10.0f, py::arg("fill") = Color{0, 0, 0, 255})
+             py::arg("family"), py::arg("size") = 10.0f, py::arg("fill") = Paint(Color{0, 0, 0, 255}))
         .def_readwrite("font", &TextStyle::font)
         .def_readwrite("size", &TextStyle::size)
         .def_readwrite("fill", &TextStyle::fill)
@@ -302,6 +338,8 @@ Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
         .def_readwrite("fake_bold", &TextStyle::fakeBold)
         .def_readwrite("fake_italic", &TextStyle::fakeItalic)
         .def_readwrite("language", &TextStyle::language)
+        .def_readwrite("emoji_presentation", &TextStyle::emojiPresentation,
+                       "絵文字の表示形式（EmojiPresentation）")
         .def_readwrite("features", &TextStyle::features,
                        "OpenType feature（['palt', '-liga', 'ss01'] など HarfBuzz の書式）。palt 等の字幅を変える feature を付けた文字は JLReq の約物の詰めを使わない")
         .def("copy", [](const TextStyle& s) { return TextStyle(s); });
@@ -342,6 +380,7 @@ Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
         .def_readwrite("first_line_indent", &ParagraphStyle::firstLineIndent)
         .def_readwrite("hanging_indent", &ParagraphStyle::hangingIndent, "2 行目以降の字下げ（em）")
         .def_readwrite("ellipsis", &ParagraphStyle::ellipsis, "行数上限で切れたときに末尾へ置く省略記号（\"…\"）")
+        .def_readwrite("rotation", &ParagraphStyle::rotation, "段落全体の回転（度。行頭を中心に時計回り）")
         .def_readwrite("tab_stops", &ParagraphStyle::tabStops,
                        "タブストップ（TabStop のリスト）。空なら tab_width × em ごと。リストはコピーを返すので作って代入する")
         .def_readwrite("line_pitch", &ParagraphStyle::linePitch)

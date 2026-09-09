@@ -747,7 +747,7 @@ TEST_CASE("FlowLayouter: keepWithNext carries a rule between heading and paragra
     };
     auto hasRedRule = [&](const page::Page& pg) {
         for (const dl::Item& item : pg.dl.items) {
-            if (const auto* r = std::get_if<dl::RectItem>(&item)) if (r->fill.r == 200 && r->fill.g == 0) return true;
+            if (const auto* r = std::get_if<dl::RectItem>(&item)) if (r->fill.solid().r == 200 && r->fill.solid().g == 0) return true;
         }
         return false;
     };

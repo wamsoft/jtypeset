@@ -48,7 +48,7 @@ struct GlyphRun {
     Pt size = 10.0f;
     std::vector<Glyph> glyphs;
 
-    std::optional<Color> fill;      ///< 塗り（無ければ塗らない）
+    std::optional<Paint> fill;      ///< 塗り（無ければ塗らない。単色またはグラデーション）
     std::optional<Stroke> stroke;   ///< 縁取り
     Pt embolden = 0.0f;             ///< フェイクボールドの太らせ幅（0 = 無し）
     /// ぼかし半径（pt）。影の層に使う。ラスタと SVG はガウスぼかし、PDF はぼかさずに描く
@@ -63,7 +63,7 @@ struct GlyphRun {
  */
 struct PathItem {
     Path path;
-    std::optional<Color> fill;
+    std::optional<Paint> fill;
     std::optional<Stroke> stroke;
     bool evenOdd = false;           ///< 塗り規則（既定は nonzero）
 };
@@ -73,7 +73,7 @@ struct PathItem {
  */
 struct RectItem {
     Rect rect;
-    Color fill;
+    Paint fill;
 };
 
 /**
@@ -128,8 +128,8 @@ struct DisplayList {
     void add(Item item) { items.push_back(std::move(item)); }
 
     // 便宜メソッド
-    void addRect(const Rect& r, Color fill) { items.push_back(RectItem{r, fill}); }
-    void addPath(Path path, std::optional<Color> fill, std::optional<Stroke> stroke = std::nullopt) {
+    void addRect(const Rect& r, Paint fill) { items.push_back(RectItem{r, std::move(fill)}); }
+    void addPath(Path path, std::optional<Paint> fill, std::optional<Stroke> stroke = std::nullopt) {
         PathItem it;
         it.path = std::move(path);
         it.fill = fill;
@@ -145,6 +145,9 @@ struct DisplayList {
 
 /// 全要素のバウンディングボックス（グリフは em box で概算）
 Rect bounds(const DisplayList& list);
+
+/// GlyphRun の外接矩形（グリフは em box で概算。グラデーションの BoundingBox 座標に使う）
+Rect runBounds(const GlyphRun& run);
 
 } // namespace typeset::dl
 

@@ -516,8 +516,9 @@ struct Walker {
         }
         if (paint.stroke && paint.strokeWidth > 0.0f) {
             Stroke s;
-            s.color = *paint.stroke;
-            s.color.a = static_cast<uint8_t>(std::clamp(s.color.a * paint.opacity * paint.strokeOpacity, 0.0f, 255.0f));
+            Color sc = *paint.stroke;
+            sc.a = static_cast<uint8_t>(std::clamp(sc.a * paint.opacity * paint.strokeOpacity, 0.0f, 255.0f));
+            s.color = sc;
             s.width = paint.strokeWidth * std::sqrt(std::fabs(ctm.determinant()));
             s.cap = paint.cap;
             s.join = paint.join;

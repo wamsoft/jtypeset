@@ -32,6 +32,13 @@ struct RasterOptions {
     float dpi = 72.0f;
     Color background{255, 255, 255, 255};   ///< a=0 で透明
     bool useCache = true;
+    /**
+     * アンチエイリアス。false でカバレッジを閾値で 2 値化して描く（小サイズのゲーム用途。にじみが出ない）。
+     * グリッドフィット（ヒンティング）は glyphware のマスク API が持たないので効かない
+     */
+    bool antialias = true;
+    /// 2 値化の閾値（0〜255。カバレッジがこれ以上なら塗る）
+    uint8_t alphaThreshold = 128;
 };
 
 class RasterRenderer {
@@ -52,9 +59,10 @@ public:
      * @param pixels ARGB8888、stridePixels はピクセル単位
      * @param toDevice ページ座標（pt）→ ピクセル座標
      */
+    /// @param alphaThreshold 0 でアンチエイリアス、> 0 でカバレッジをその値で 2 値化する
     void render(const dl::DisplayList& list,
                 uint32_t* pixels, int width, int height, int stridePixels,
-                const Matrix& toDevice, bool useCache = true);
+                const Matrix& toDevice, bool useCache = true, uint8_t alphaThreshold = 0);
 
     void clearCache();
     void setCacheMaxBytes(size_t bytes);

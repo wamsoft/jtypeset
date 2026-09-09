@@ -148,29 +148,6 @@ std::string pathData(const Path& path, int precision) {
     return d;
 }
 
-std::string paintAttrs(const std::optional<Color>& fill, const std::optional<Stroke>& stroke,
-                       float strokeScale, float opacity, int precision) {
-    std::string a;
-    if (fill && fill->a > 0) {
-        a += " fill=\"" + hexColor(*fill) + "\"";
-        const float fa = fill->a / 255.0f * opacity;
-        if (fa < 0.999f) a += " fill-opacity=\"" + fmt(fa, 3) + "\"";
-    } else {
-        a += " fill=\"none\"";
-    }
-    if (stroke && stroke->color.a > 0 && stroke->width > 0.0f) {
-        a += " stroke=\"" + hexColor(stroke->color) + "\"";
-        a += " stroke-width=\"" + fmt(stroke->width * strokeScale, precision) + "\"";
-        const float sa = stroke->color.a / 255.0f * opacity;
-        if (sa < 0.999f) a += " stroke-opacity=\"" + fmt(sa, 3) + "\"";
-        if (stroke->join == StrokeJoin::Round) a += " stroke-linejoin=\"round\"";
-        else if (stroke->join == StrokeJoin::Bevel) a += " stroke-linejoin=\"bevel\"";
-        if (stroke->cap == StrokeCap::Round) a += " stroke-linecap=\"round\"";
-        else if (stroke->cap == StrokeCap::Square) a += " stroke-linecap=\"square\"";
-    }
-    return a;
-}
-
 struct Writer {
     const SvgOptions& opts;
     std::string body;
@@ -178,6 +155,76 @@ struct Writer {
     std::unordered_map<const glyphware::Face*, int> faceIds;
     std::map<std::pair<int, uint32_t>, std::string> glyphIds;   // (face, gid) → id
     int clipCounter = 0;
+    int gradientCounter = 0;
+
+    /**
+     * 塗り → SVG の paint 値（"#rrggbb" か "url(#gN)"）。グラデーションは userSpaceOnUse で defs に足す。
+     * @param box BoundingBox 単位の基準にする外接矩形（ページ座標）
+     */
+    std::string paintRef(const Paint& paint, const Rect& box) {
+        if (!paint.isGradient()) return hexColor(paint.solid());
+        // 塗りの座標 → ページ座標
+        auto toUser = [&](Point p) {
+            if (paint.units == PaintUnits::UserSpace) return p;
+            return Point{box.x + p.x * box.w, box.y + p.y * box.h};
+        };
+        const std::string id = "grad" + std::to_string(gradientCounter++);
+        std::string g;
+        if (paint.kind == PaintKind::Radial) {
+            const Point c = toUser(paint.start);
+            // BoundingBox は縦横に伸ばした単位円。gradientTransform で楕円にする
+            const float rx = paint.units == PaintUnits::UserSpace ? paint.radius : paint.radius * box.w;
+            const float ry = paint.units == PaintUnits::UserSpace ? paint.radius : paint.radius * box.h;
+            const float r = std::max(1e-4f, rx);
+            g = "<radialGradient id=\"" + id + "\" gradientUnits=\"userSpaceOnUse\" cx=\"" +
+                fmt(c.x, opts.precision) + "\" cy=\"" + fmt(c.y, opts.precision) + "\" r=\"" +
+                fmt(r, opts.precision) + "\"";
+            if (std::fabs(rx - ry) > 1e-4f) {
+                // (cx,cy) を中心に y 方向へ ry/rx 倍
+                const float k = ry / r;
+                g += " gradientTransform=\"matrix(1 0 0 " + fmt(k, 5) + " 0 " +
+                     fmt(c.y * (1.0f - k), opts.precision) + ")\"";
+            }
+            g += ">\n";
+        } else {
+            const Point a = toUser(paint.start);
+            const Point b = toUser(paint.end);
+            g = "<linearGradient id=\"" + id + "\" gradientUnits=\"userSpaceOnUse\" x1=\"" +
+                fmt(a.x, opts.precision) + "\" y1=\"" + fmt(a.y, opts.precision) + "\" x2=\"" +
+                fmt(b.x, opts.precision) + "\" y2=\"" + fmt(b.y, opts.precision) + "\">\n";
+        }
+        for (const GradientStop& s : paint.stops) {
+            g += "<stop offset=\"" + fmt(s.offset, 4) + "\" stop-color=\"" + hexColor(s.color) + "\"";
+            if (s.color.a < 255) g += " stop-opacity=\"" + fmt(s.color.a / 255.0f, 3) + "\"";
+            g += "/>\n";
+        }
+        g += paint.kind == PaintKind::Radial ? "</radialGradient>\n" : "</linearGradient>\n";
+        defs += g;
+        return "url(#" + id + ")";
+    }
+
+    std::string paintAttrs(const std::optional<Paint>& fill, const std::optional<Stroke>& stroke,
+                           float strokeScale, float opacity, const Rect& box) {
+        std::string a;
+        if (fill && fill->maxAlpha() > 0) {
+            a += " fill=\"" + paintRef(*fill, box) + "\"";
+            const float fa = fill->isGradient() ? opacity : fill->color.a / 255.0f * opacity;
+            if (fa < 0.999f) a += " fill-opacity=\"" + fmt(fa, 3) + "\"";
+        } else {
+            a += " fill=\"none\"";
+        }
+        if (stroke && stroke->color.maxAlpha() > 0 && stroke->width > 0.0f) {
+            a += " stroke=\"" + paintRef(stroke->color, box) + "\"";
+            a += " stroke-width=\"" + fmt(stroke->width * strokeScale, opts.precision) + "\"";
+            const float sa = stroke->color.isGradient() ? opacity : stroke->color.color.a / 255.0f * opacity;
+            if (sa < 0.999f) a += " stroke-opacity=\"" + fmt(sa, 3) + "\"";
+            if (stroke->join == StrokeJoin::Round) a += " stroke-linejoin=\"round\"";
+            else if (stroke->join == StrokeJoin::Bevel) a += " stroke-linejoin=\"bevel\"";
+            if (stroke->cap == StrokeCap::Round) a += " stroke-linecap=\"round\"";
+            else if (stroke->cap == StrokeCap::Square) a += " stroke-linecap=\"square\"";
+        }
+        return a;
+    }
 
     explicit Writer(const SvgOptions& o) : opts(o) {}
 
@@ -216,6 +263,35 @@ struct Writer {
         return id;
     }
 
+    /// グリフの形でクリップした矩形をグラデーションで塗る
+    void gradientGlyphRun(const dl::GlyphRun& run, const Matrix& ctm, float opacity, const Rect& pageBox) {
+        const float upem = font::unitsPerEm(*run.face);
+        const float s = run.size / upem;
+        Matrix base;
+        base.xx = s; base.yy = s;
+        const std::string clipId = "gc" + std::to_string(clipCounter++);
+        std::string clip = "<clipPath id=\"" + clipId + "\">\n";
+        for (const dl::Glyph& g : run.glyphs) {
+            Matrix m = multiply(Matrix::fromMat2(g.xform), base);
+            m = multiply(Matrix::translation(g.pos.x, g.pos.y), m);
+            m = multiply(ctm, m);
+            const std::string id = glyphDef(run.face, g.gid);
+            clip += "<use href=\"#" + id + "\" transform=\"" + matrixAttr(m, opts.precision) + "\"/>\n";
+        }
+        clip += "</clipPath>\n";
+        defs += clip;
+
+        // 余白を少し広げた矩形（縁取りのぶんは掛からないが、塗りは覆う）
+        const float pad = std::max(1.0f, run.size * 0.5f);
+        const Rect r{pageBox.x - pad, pageBox.y - pad, pageBox.w + pad * 2, pageBox.h + pad * 2};
+        body += "<g clip-path=\"url(#" + clipId + ")\"><rect x=\"" + fmt(r.x, opts.precision) +
+                "\" y=\"" + fmt(r.y, opts.precision) + "\" width=\"" + fmt(r.w, opts.precision) +
+                "\" height=\"" + fmt(r.h, opts.precision) + "\" fill=\"" +
+                paintRef(*run.fill, pageBox) + "\"";
+        if (opacity < 0.999f) body += " opacity=\"" + fmt(opacity, 3) + "\"";
+        body += "/></g>\n";
+    }
+
     void glyphRun(const dl::GlyphRun& run, const Matrix& ctm, float opacity) {
         if (!run.face || run.glyphs.empty()) return;
         const float upem = font::unitsPerEm(*run.face);
@@ -224,17 +300,33 @@ struct Writer {
         base.xx = s; base.yy = s;
         const float devScale = std::sqrt(std::fabs(ctm.determinant()));
 
+        // グリフの外接矩形（ページ座標）。グラデーションの BoundingBox 座標に使う
+        const Rect rb = dl::runBounds(run);
+        const Point rp0 = ctm.apply(Point{rb.x, rb.y});
+        const Point rp1 = ctm.apply(Point{rb.right(), rb.bottom()});
+        const Rect pageBox{std::min(rp0.x, rp1.x), std::min(rp0.y, rp1.y),
+                           std::fabs(rp1.x - rp0.x), std::fabs(rp1.y - rp0.y)};
+
+        // グラデーションの塗り: グリフでクリップした矩形をグラデーションで塗る
+        // （<use> の transform がグラデーションの座標系に掛からないようにするため）
+        if (run.fill && run.fill->isGradient()) {
+            gradientGlyphRun(run, ctm, opacity, pageBox);
+            if (!run.stroke) return;
+        }
+
         // グリフ座標系に掛かるスケールを線幅から打ち消す（一様スケール前提）
         std::optional<Stroke> stroke = run.stroke;
         if (stroke && run.embolden > 0.0f) stroke->width += run.embolden;
-        std::string attrs = paintAttrs(run.fill, stroke, 1.0f / (s * devScale), opacity, opts.precision);
-        if (run.embolden > 0.0f && run.fill && !run.stroke) {
+        std::optional<Paint> fill = run.fill;
+        if (fill && fill->isGradient()) fill.reset();          // 上で塗った
+        std::string attrs = paintAttrs(fill, stroke, 1.0f / (s * devScale), opacity, pageBox);
+        if (run.embolden > 0.0f && fill && !run.stroke) {
             // フェイクボールドは同色の縁取りで太らせる
             Stroke fake;
-            fake.color = *run.fill;
+            fake.color = *fill;
             fake.width = run.embolden;
             fake.join = StrokeJoin::Round;
-            attrs = paintAttrs(run.fill, fake, 1.0f / (s * devScale), opacity, opts.precision);
+            attrs = paintAttrs(fill, fake, 1.0f / (s * devScale), opacity, pageBox);
         }
 
         body += "<g" + attrs;
@@ -259,13 +351,14 @@ struct Writer {
         body += "</g>\n";
     }
 
-    void pathItem(const Path& path, const std::optional<Color>& fill,
+    void pathItem(const Path& path, const std::optional<Paint>& fill,
                   const std::optional<Stroke>& stroke, bool evenOdd, const Matrix& ctm,
                   float opacity) {
         if (path.empty()) return;
         const float devScale = std::sqrt(std::fabs(ctm.determinant()));
-        body += "<path d=\"" + pathData(path.transformed(ctm), opts.precision) + "\"" +
-                paintAttrs(fill, stroke, devScale, opacity, opts.precision);
+        const Path dev = path.transformed(ctm);
+        body += "<path d=\"" + pathData(dev, opts.precision) + "\"" +
+                paintAttrs(fill, stroke, devScale, opacity, dev.controlBounds());
         if (evenOdd) body += " fill-rule=\"evenodd\"";
         body += "/>\n";
     }
