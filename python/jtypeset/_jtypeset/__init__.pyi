@@ -12,7 +12,7 @@ from __future__ import annotations
 import collections.abc
 import typing
 from . import paper
-__all__: list[str] = ['Align', 'Annotation', 'BlockStyle', 'BreakKind', 'BreakOptions', 'CM', 'Color', 'EmphasisMark', 'Flow', 'FlowLayouter', 'FontSet', 'FontSpec', 'HAS_MICROTEX', 'INCH', 'Image', 'ImageBlock', 'ImagePlacement', 'IndexBlock', 'InlineRun', 'LineBreakStrategy', 'LineInfo', 'ListBlock', 'ListMarker', 'MM', 'Margins', 'ObjectBlock', 'ObjectRegistry', 'ObjectResult', 'Page', 'PageMaster', 'PageSequence', 'Paragraph', 'ParagraphStyle', 'Point', 'Rect', 'RubyMode', 'RunningText', 'Size', 'SpacingOptions', 'Stroke', 'TableBlock', 'TableBorders', 'TableCell', 'TableColumn', 'TableRow', 'TextOrientation', 'TextStyle', 'TocBlock', 'VAlign', 'WritingMode', 'image_from_rgba', 'layout_paragraph', 'load_image', 'paper', 'save_pdf', 'superscript_style']
+__all__: list[str] = ['Align', 'Annotation', 'BlockAlign', 'BlockStyle', 'BreakKind', 'BreakOptions', 'CM', 'CharInfo', 'CodepointRange', 'Color', 'Direction', 'EmojiPresentation', 'EmphasisMark', 'Flow', 'FlowLayouter', 'FontDeclaration', 'FontSet', 'FontSpec', 'GradientStop', 'HAS_MICROTEX', 'HitResult', 'HyphenationDictionary', 'Hyphenator', 'INCH', 'Image', 'ImageBlock', 'ImagePlacement', 'IndexBlock', 'InlineRun', 'KinsokuLevel', 'LineBreakStrategy', 'LineInfo', 'ListBlock', 'ListMarker', 'MM', 'Margins', 'ObjectBlock', 'ObjectRegistry', 'ObjectResult', 'Page', 'PageMaster', 'PageSequence', 'Paint', 'PaintKind', 'PaintUnits', 'Paragraph', 'ParagraphLayout', 'ParagraphStyle', 'PlaceholderRect', 'Point', 'Rect', 'RubyMode', 'RunningText', 'Size', 'SpacingOptions', 'Stroke', 'TabAlign', 'TabStop', 'TableBlock', 'TableBorders', 'TableCell', 'TableColumn', 'TableRow', 'TagLink', 'TagMarker', 'TagParseOptions', 'TagParseResult', 'TagPlaceholder', 'TextDecoration', 'TextLayer', 'TextMetrics', 'TextOrientation', 'TextShadow', 'TextStyle', 'TocBlock', 'VAlign', 'WrapMode', 'WritingMode', 'fit_paragraph', 'image_from_rgba', 'layout_paragraph', 'load_image', 'measure_text', 'paper', 'parse_tagged_text', 'save_pdf', 'strip_tags', 'superscript_style']
 class Align:
     """
     Members:
@@ -65,8 +65,18 @@ class Annotation:
     def emphasis(start: typing.SupportsInt | typing.SupportsIndex, end: typing.SupportsInt | typing.SupportsIndex, mark: EmphasisMark = ..., scale: typing.SupportsFloat | typing.SupportsIndex = 0.5, opposite_side: bool = False) -> Annotation:
         ...
     @staticmethod
+    def indent(start: typing.SupportsInt | typing.SupportsIndex, end: typing.SupportsInt | typing.SupportsIndex, indent_em: typing.SupportsFloat | typing.SupportsIndex) -> Annotation:
+        """
+        途中からの字下げ: 行頭が [start, end) にある行を indent_em 下げる
+        """
+    @staticmethod
     def jidori(start: typing.SupportsInt | typing.SupportsIndex, end: typing.SupportsInt | typing.SupportsIndex, em: typing.SupportsFloat | typing.SupportsIndex) -> Annotation:
         ...
+    @staticmethod
+    def move_to(start: typing.SupportsInt | typing.SupportsIndex, position: typing.SupportsFloat | typing.SupportsIndex) -> Annotation:
+        """
+        行内の絶対位置: start の文字を行頭から position（pt）から始める
+        """
     @staticmethod
     def ruby(start: typing.SupportsInt | typing.SupportsIndex, end: typing.SupportsInt | typing.SupportsIndex, text: str, mode: RubyMode = ..., scale: typing.SupportsFloat | typing.SupportsIndex = 0.5) -> Annotation:
         ...
@@ -83,6 +93,14 @@ class Annotation:
     def end(self, arg0: typing.SupportsInt | typing.SupportsIndex) -> None:
         ...
     @property
+    def offset(self) -> float:
+        """
+        ルビ・圏点と親文字の間隔（親文字の em）
+        """
+    @offset.setter
+    def offset(self, arg0: typing.SupportsFloat | typing.SupportsIndex) -> None:
+        ...
+    @property
     def scale(self) -> float:
         ...
     @scale.setter
@@ -93,6 +111,48 @@ class Annotation:
         ...
     @start.setter
     def start(self, arg0: typing.SupportsInt | typing.SupportsIndex) -> None:
+        ...
+class BlockAlign:
+    """
+    行送り方向の揃え（箱の中での段落の位置）
+    
+    Members:
+    
+      START
+    
+      CENTER
+    
+      END
+    """
+    CENTER: typing.ClassVar[BlockAlign]  # value = <BlockAlign.CENTER: 1>
+    END: typing.ClassVar[BlockAlign]  # value = <BlockAlign.END: 2>
+    START: typing.ClassVar[BlockAlign]  # value = <BlockAlign.START: 0>
+    __members__: typing.ClassVar[dict[str, BlockAlign]]  # value = {'START': <BlockAlign.START: 0>, 'CENTER': <BlockAlign.CENTER: 1>, 'END': <BlockAlign.END: 2>}
+    def __eq__(self, other: typing.Any) -> bool:
+        ...
+    def __getstate__(self) -> int:
+        ...
+    def __hash__(self) -> int:
+        ...
+    def __index__(self) -> int:
+        ...
+    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
+        ...
+    def __int__(self) -> int:
+        ...
+    def __ne__(self, other: typing.Any) -> bool:
+        ...
+    def __repr__(self) -> str:
+        ...
+    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
+        ...
+    def __str__(self) -> str:
+        ...
+    @property
+    def name(self) -> str:
+        ...
+    @property
+    def value(self) -> int:
         ...
 class BlockStyle:
     """
@@ -186,6 +246,32 @@ class BreakOptions:
     def __init__(self) -> None:
         ...
     @property
+    def hyphen_min_left(self) -> int:
+        ...
+    @hyphen_min_left.setter
+    def hyphen_min_left(self, arg0: typing.SupportsInt | typing.SupportsIndex) -> None:
+        ...
+    @property
+    def hyphen_min_right(self) -> int:
+        ...
+    @hyphen_min_right.setter
+    def hyphen_min_right(self, arg0: typing.SupportsInt | typing.SupportsIndex) -> None:
+        ...
+    @property
+    def hyphen_penalty(self) -> float:
+        ...
+    @hyphen_penalty.setter
+    def hyphen_penalty(self, arg0: typing.SupportsFloat | typing.SupportsIndex) -> None:
+        ...
+    @property
+    def hyphenation(self) -> HyphenationDictionary:
+        """
+        欧文のハイフネーション辞書（HyphenationDictionary）。所有しないので、組版の間は生かしておくこと
+        """
+    @hyphenation.setter
+    def hyphenation(self, arg0: HyphenationDictionary) -> None:
+        ...
+    @property
     def line_penalty(self) -> float:
         ...
     @line_penalty.setter
@@ -196,6 +282,82 @@ class BreakOptions:
         ...
     @tolerance.setter
     def tolerance(self, arg0: typing.SupportsFloat | typing.SupportsIndex) -> None:
+        ...
+    @property
+    def wrap(self) -> WrapMode:
+        """
+        折返しの方式（WrapMode）
+        """
+    @wrap.setter
+    def wrap(self, arg0: WrapMode) -> None:
+        ...
+class CharInfo:
+    """
+    組んだあとの文字 1 つ（位置・大きさ・スタイル番号・グリフ・物理矩形）
+    """
+    def __repr__(self) -> str:
+        ...
+    @property
+    def block_max(self) -> float:
+        ...
+    @property
+    def block_min(self) -> float:
+        """
+        箱の block 範囲（行の中心線から）
+        """
+    @property
+    def char_index(self) -> int:
+        """
+        元テキストでの位置（UTF-16）
+        """
+    @property
+    def face_key(self) -> str:
+        """
+        FontSet のキー
+        """
+    @property
+    def gid(self) -> int:
+        ...
+    @property
+    def image(self) -> bool:
+        ...
+    @property
+    def inline_end(self) -> float:
+        ...
+    @property
+    def inline_start(self) -> float:
+        """
+        箱の始端（行頭から、pt）
+        """
+    @property
+    def line_index(self) -> int:
+        ...
+    @property
+    def object(self) -> bool:
+        ...
+    @property
+    def placeholder(self) -> bool:
+        ...
+    @property
+    def rect(self) -> Rect:
+        """
+        物理矩形（origin を渡して組んだとき）
+        """
+    @property
+    def size(self) -> float:
+        ...
+    @property
+    def style_index(self) -> int:
+        """
+        Paragraph の run の番号
+        """
+class CodepointRange:
+    """
+    コードポイントの範囲（両端含む）
+    """
+    hi: str
+    lo: str
+    def __init__(self, lo: typing.SupportsInt | typing.SupportsIndex, hi: typing.SupportsInt | typing.SupportsIndex) -> None:
         ...
 class Color:
     """
@@ -230,6 +392,90 @@ class Color:
         ...
     @r.setter
     def r(self, arg0: typing.SupportsInt | typing.SupportsIndex) -> None:
+        ...
+class Direction:
+    """
+    段落の基底方向（AUTO は最初の強い文字で決める）
+    
+    Members:
+    
+      AUTO
+    
+      LTR
+    
+      RTL
+    """
+    AUTO: typing.ClassVar[Direction]  # value = <Direction.AUTO: 0>
+    LTR: typing.ClassVar[Direction]  # value = <Direction.LTR: 1>
+    RTL: typing.ClassVar[Direction]  # value = <Direction.RTL: 2>
+    __members__: typing.ClassVar[dict[str, Direction]]  # value = {'AUTO': <Direction.AUTO: 0>, 'LTR': <Direction.LTR: 1>, 'RTL': <Direction.RTL: 2>}
+    def __eq__(self, other: typing.Any) -> bool:
+        ...
+    def __getstate__(self) -> int:
+        ...
+    def __hash__(self) -> int:
+        ...
+    def __index__(self) -> int:
+        ...
+    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
+        ...
+    def __int__(self) -> int:
+        ...
+    def __ne__(self, other: typing.Any) -> bool:
+        ...
+    def __repr__(self) -> str:
+        ...
+    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
+        ...
+    def __str__(self) -> str:
+        ...
+    @property
+    def name(self) -> str:
+        ...
+    @property
+    def value(self) -> int:
+        ...
+class EmojiPresentation:
+    """
+    絵文字の表示形式: AUTO（異体字セレクタに従う）/ TEXT（モノクロの字形）/ EMOJI（カラー）
+    
+    Members:
+    
+      AUTO
+    
+      TEXT
+    
+      EMOJI
+    """
+    AUTO: typing.ClassVar[EmojiPresentation]  # value = <EmojiPresentation.AUTO: 0>
+    EMOJI: typing.ClassVar[EmojiPresentation]  # value = <EmojiPresentation.EMOJI: 2>
+    TEXT: typing.ClassVar[EmojiPresentation]  # value = <EmojiPresentation.TEXT: 1>
+    __members__: typing.ClassVar[dict[str, EmojiPresentation]]  # value = {'AUTO': <EmojiPresentation.AUTO: 0>, 'TEXT': <EmojiPresentation.TEXT: 1>, 'EMOJI': <EmojiPresentation.EMOJI: 2>}
+    def __eq__(self, other: typing.Any) -> bool:
+        ...
+    def __getstate__(self) -> int:
+        ...
+    def __hash__(self) -> int:
+        ...
+    def __index__(self) -> int:
+        ...
+    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
+        ...
+    def __int__(self) -> int:
+        ...
+    def __ne__(self, other: typing.Any) -> bool:
+        ...
+    def __repr__(self) -> str:
+        ...
+    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
+        ...
+    def __str__(self) -> str:
+        ...
+    @property
+    def name(self) -> str:
+        ...
+    @property
+    def value(self) -> int:
         ...
 class EmphasisMark:
     """
@@ -324,17 +570,99 @@ class FlowLayouter:
         """
         Flow をページ列へ流し込む。fields は柱・ノンブル・本文の {name} 置換
         """
+class FontDeclaration:
+    """
+    開かずに登録するフォントのメタデータ（キー・ファイル・family 別名・weight・italic・languages・ranges）
+    """
+    key: str
+    path: str
+    def __init__(self) -> None:
+        ...
+    @property
+    def face_index(self) -> int:
+        ...
+    @face_index.setter
+    def face_index(self, arg0: typing.SupportsInt | typing.SupportsIndex) -> None:
+        ...
+    @property
+    def family(self) -> list[str]:
+        ...
+    @family.setter
+    def family(self, arg0: collections.abc.Sequence[str]) -> None:
+        ...
+    @property
+    def italic(self) -> bool | None:
+        """
+        None でフォントから
+        """
+    @italic.setter
+    def italic(self, arg0: bool | None) -> None:
+        ...
+    @property
+    def languages(self) -> list[str]:
+        """
+        BCP47。この言語のテキストで先に試される
+        """
+    @languages.setter
+    def languages(self, arg0: collections.abc.Sequence[str]) -> None:
+        ...
+    @property
+    def ranges(self) -> list[CodepointRange]:
+        """
+        カバレッジ（空なら開いて cmap を見る）
+        """
+    @ranges.setter
+    def ranges(self, arg0: collections.abc.Sequence[CodepointRange]) -> None:
+        ...
+    @property
+    def weight(self) -> int:
+        """
+        100〜900。0 でフォントから
+        """
+    @weight.setter
+    def weight(self, arg0: typing.SupportsInt | typing.SupportsIndex) -> None:
+        ...
 class FontSet:
     """
-    フォントの集合。load_file / load_bytes で開き、TextStyle の family（キーまたは family 名）で引く。文字が無ければ次の family へフォールバックする
+    フォントの集合。load_file / load_bytes で開くか declare で宣言（初回使用時に開く）し、TextStyle の family（キーまたは family 名）で引く。同じ family の複数 face から weight / italic の最近傍を選び、文字が無ければ次の family へフォールバックする。set_language_fonts で言語ごとに先に試す family を指定できる
     """
     def __init__(self) -> None:
+        ...
+    @typing.overload
+    def declare(self, path: str, key: str = '', family: collections.abc.Sequence[str] = [], weight: typing.SupportsInt | typing.SupportsIndex = 0, italic: bool | None = None, languages: collections.abc.Sequence[str] = [], ranges: collections.abc.Sequence[CodepointRange] = [], face_index: typing.SupportsInt | typing.SupportsIndex = 0) -> bool:
+        """
+        開かずに宣言する（初回使用時に開く）。key を省略するとパスがキー。weight=0 / italic=None はフォントから取る
+        """
+    @typing.overload
+    def declare(self, declaration: FontDeclaration) -> bool:
+        ...
+    def has(self, key: str) -> bool:
+        """
+        登録済みか（開いていなくてもよい）
+        """
+    def is_loaded(self, key: str) -> bool:
+        """
+        開いているか
+        """
+    def keys(self) -> list[str]:
+        """
+        登録したキー（登録順）
+        """
+    def language_fonts(self, language: str) -> list[str]:
         ...
     def load_bytes(self, key: str, data: bytes, face_index: typing.SupportsInt | typing.SupportsIndex = 0) -> bool:
         ...
     def load_file(self, path: str, key: str = '', face_index: typing.SupportsInt | typing.SupportsIndex = 0) -> bool:
         """
         フォントファイルを開く。key を省略するとパスがキーになる
+        """
+    def select(self, name: str, weight: typing.SupportsInt | typing.SupportsIndex = 400, italic: bool = False) -> str | None:
+        """
+        キー／family 名と weight / italic に最も近い face のキー（無ければ None）。必要なら開く
+        """
+    def set_language_fonts(self, language: str, families: collections.abc.Sequence[str]) -> None:
+        """
+        この言語のテキストで先に試す family 列（空で削除）。"zh-Hans" の完全一致が無ければ "zh" を使う
         """
     @property
     def size(self) -> int:
@@ -357,10 +685,91 @@ class FontSpec:
     def family(self, arg0: collections.abc.Sequence[str]) -> None:
         ...
     @property
+    def variations(self) -> dict[str, float]:
+        """
+        バリアブルフォントの軸の値（{'wght': 700, 'wdth': 75}）。wght が無ければ weight が入る。辞書はコピーを返すので作って代入する
+        """
+    @variations.setter
+    def variations(self, arg0: collections.abc.Mapping[str, typing.SupportsFloat | typing.SupportsIndex]) -> None:
+        ...
+    @property
     def weight(self) -> int:
         ...
     @weight.setter
     def weight(self, arg0: typing.SupportsInt | typing.SupportsIndex) -> None:
+        ...
+class GradientStop:
+    """
+    グラデーションの停止点（0〜1 の位置と色）
+    """
+    color: Color
+    def __init__(self, offset: typing.SupportsFloat | typing.SupportsIndex, color: Color) -> None:
+        ...
+    @property
+    def offset(self) -> float:
+        ...
+    @offset.setter
+    def offset(self, arg0: typing.SupportsFloat | typing.SupportsIndex) -> None:
+        ...
+class HitResult:
+    """
+    hit_test の結果
+    """
+    @property
+    def after(self) -> bool:
+        """
+        箱の後半か（キャレットを次の文字の前に置く判断用）
+        """
+    @property
+    def char_index(self) -> int:
+        """
+        当たった文字（行の後ろの余白なら行末）
+        """
+    @property
+    def inside(self) -> bool:
+        """
+        文字の箱の中か（False なら行の端に丸めた）
+        """
+    @property
+    def line_index(self) -> int:
+        ...
+class HyphenationDictionary:
+    """
+    言語ごとのハイフネーションのパターン。TextStyle.language で引く
+    """
+    def __init__(self) -> None:
+        ...
+    def empty(self) -> bool:
+        ...
+    def find(self, language: str) -> Hyphenator:
+        ...
+    def for_language(self, language: str) -> Hyphenator:
+        """
+        その言語の Hyphenator（無ければ作る）
+        """
+class Hyphenator:
+    """
+    欧文のハイフネーション（Liang のパターン）。TeX の hyph-*.tex を読ませて使う
+    """
+    def __init__(self) -> None:
+        ...
+    def add_exception(self, word: str) -> None:
+        """
+        as-so-ciate のような例外を足す
+        """
+    def add_pattern_file(self, path: str) -> int:
+        ...
+    def add_patterns(self, text: str) -> int:
+        """
+        TeX のパターン（patterns{} / hyphenation{}）または 1 行 1 パターンの素のリストを読む
+        """
+    def empty(self) -> bool:
+        ...
+    def hyphenate(self, word: str, min_left: typing.SupportsInt | typing.SupportsIndex = 2, min_right: typing.SupportsInt | typing.SupportsIndex = 3) -> list[int]:
+        """
+        分割位置（先頭から k 文字目の後ろで切ってよい k の列）
+        """
+    def pattern_count(self) -> int:
         ...
 class Image:
     @property
@@ -463,6 +872,48 @@ class InlineRun:
     style: TextStyle
     text: str
     def __init__(self, text: str, style: TextStyle) -> None:
+        ...
+class KinsokuLevel:
+    """
+    禁則の強さ: STRICT（JLReq のまま）/ NORMAL（小書きの仮名・長音・繰返し記号・ハイフン類を弱い禁則に）/ LOOSE（句読点・終わり括弧・中点・区切り約物も弱い禁則に）
+    
+    Members:
+    
+      STRICT
+    
+      NORMAL
+    
+      LOOSE
+    """
+    LOOSE: typing.ClassVar[KinsokuLevel]  # value = <KinsokuLevel.LOOSE: 2>
+    NORMAL: typing.ClassVar[KinsokuLevel]  # value = <KinsokuLevel.NORMAL: 1>
+    STRICT: typing.ClassVar[KinsokuLevel]  # value = <KinsokuLevel.STRICT: 0>
+    __members__: typing.ClassVar[dict[str, KinsokuLevel]]  # value = {'STRICT': <KinsokuLevel.STRICT: 0>, 'NORMAL': <KinsokuLevel.NORMAL: 1>, 'LOOSE': <KinsokuLevel.LOOSE: 2>}
+    def __eq__(self, other: typing.Any) -> bool:
+        ...
+    def __getstate__(self) -> int:
+        ...
+    def __hash__(self) -> int:
+        ...
+    def __index__(self) -> int:
+        ...
+    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
+        ...
+    def __int__(self) -> int:
+        ...
+    def __ne__(self, other: typing.Any) -> bool:
+        ...
+    def __repr__(self) -> str:
+        ...
+    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
+        ...
+    def __str__(self) -> str:
+        ...
+    @property
+    def name(self) -> str:
+        ...
+    @property
+    def value(self) -> int:
         ...
 class LineBreakStrategy:
     """
@@ -761,6 +1212,132 @@ class PageSequence:
     @first_page_number.setter
     def first_page_number(self, arg0: typing.SupportsInt | typing.SupportsIndex) -> None:
         ...
+class Paint:
+    """
+    塗り — 単色または線形／放射グラデーション。Color を渡せる所にはそのまま渡せる（単色）
+    """
+    color: Color
+    end: Point
+    kind: PaintKind
+    start: Point
+    units: PaintUnits
+    @staticmethod
+    def linear(start: Point, end: Point, stops: collections.abc.Sequence[GradientStop], units: PaintUnits = ...) -> Paint:
+        """
+        線形グラデーション
+        """
+    @staticmethod
+    def radial(center: Point, radius: typing.SupportsFloat | typing.SupportsIndex, stops: collections.abc.Sequence[GradientStop], units: PaintUnits = ...) -> Paint:
+        """
+        放射グラデーション
+        """
+    @typing.overload
+    def __init__(self) -> None:
+        ...
+    @typing.overload
+    def __init__(self, color: Color) -> None:
+        ...
+    def is_gradient(self) -> bool:
+        ...
+    def solid(self) -> Color:
+        """
+        単色として扱うときの色
+        """
+    @property
+    def radius(self) -> float:
+        ...
+    @radius.setter
+    def radius(self, arg0: typing.SupportsFloat | typing.SupportsIndex) -> None:
+        ...
+    @property
+    def stops(self) -> list[GradientStop]:
+        """
+        停止点のリスト（コピーを返すので作って代入する）
+        """
+    @stops.setter
+    def stops(self, arg0: collections.abc.Sequence[GradientStop]) -> None:
+        ...
+class PaintKind:
+    """
+    塗りの種類
+    
+    Members:
+    
+      SOLID
+    
+      LINEAR
+    
+      RADIAL
+    """
+    LINEAR: typing.ClassVar[PaintKind]  # value = <PaintKind.LINEAR: 1>
+    RADIAL: typing.ClassVar[PaintKind]  # value = <PaintKind.RADIAL: 2>
+    SOLID: typing.ClassVar[PaintKind]  # value = <PaintKind.SOLID: 0>
+    __members__: typing.ClassVar[dict[str, PaintKind]]  # value = {'SOLID': <PaintKind.SOLID: 0>, 'LINEAR': <PaintKind.LINEAR: 1>, 'RADIAL': <PaintKind.RADIAL: 2>}
+    def __eq__(self, other: typing.Any) -> bool:
+        ...
+    def __getstate__(self) -> int:
+        ...
+    def __hash__(self) -> int:
+        ...
+    def __index__(self) -> int:
+        ...
+    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
+        ...
+    def __int__(self) -> int:
+        ...
+    def __ne__(self, other: typing.Any) -> bool:
+        ...
+    def __repr__(self) -> str:
+        ...
+    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
+        ...
+    def __str__(self) -> str:
+        ...
+    @property
+    def name(self) -> str:
+        ...
+    @property
+    def value(self) -> int:
+        ...
+class PaintUnits:
+    """
+    グラデーションの座標系: BOUNDING_BOX（対象の外接矩形を 0〜1 に正規化）/ USER_SPACE（ページ座標 pt）
+    
+    Members:
+    
+      BOUNDING_BOX
+    
+      USER_SPACE
+    """
+    BOUNDING_BOX: typing.ClassVar[PaintUnits]  # value = <PaintUnits.BOUNDING_BOX: 0>
+    USER_SPACE: typing.ClassVar[PaintUnits]  # value = <PaintUnits.USER_SPACE: 1>
+    __members__: typing.ClassVar[dict[str, PaintUnits]]  # value = {'BOUNDING_BOX': <PaintUnits.BOUNDING_BOX: 0>, 'USER_SPACE': <PaintUnits.USER_SPACE: 1>}
+    def __eq__(self, other: typing.Any) -> bool:
+        ...
+    def __getstate__(self) -> int:
+        ...
+    def __hash__(self) -> int:
+        ...
+    def __index__(self) -> int:
+        ...
+    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
+        ...
+    def __int__(self) -> int:
+        ...
+    def __ne__(self, other: typing.Any) -> bool:
+        ...
+    def __repr__(self) -> str:
+        ...
+    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
+        ...
+    def __str__(self) -> str:
+        ...
+    @property
+    def name(self) -> str:
+        ...
+    @property
+    def value(self) -> int:
+        ...
 class Paragraph:
     """
     段落: run の列＋注記＋段落スタイル。add_run / add_image / add_object / add_footnote / annotate で組み立てる
@@ -784,6 +1361,10 @@ class Paragraph:
         """
         外部ハンドラのオブジェクト（数式など）を行内に足す。layout(objects=...) の ObjectRegistry で解決される
         """
+    def add_placeholder(self, size: Size, style: TextStyle, id: str = '') -> None:
+        """
+        行内プレースホルダ（描かない空箱、本文中の位置は 1 文字ぶん）を足す。位置は ParagraphLayout.placeholder_rects で取る
+        """
     def add_run(self, text: str, style: TextStyle, literal: bool = False) -> None:
         """
         run を足す。literal なら {name} の置換や {index:} の収集をしない（コード用）
@@ -805,6 +1386,80 @@ class Paragraph:
     @property
     def text(self) -> str:
         ...
+class ParagraphLayout:
+    """
+    layout_paragraph の結果。行の列（len / 添字 / 反復で LineInfo）と、組んだあとの取り出し口。origin は 1 行目の行頭（横組み: 左端 x と 1 行目の中心線 y、縦組み: 1 列目の中心線 x と上端 y）
+    """
+    def __getitem__(self, arg0: typing.SupportsInt | typing.SupportsIndex) -> LineInfo:
+        ...
+    def __iter__(self) -> collections.abc.Iterator:
+        ...
+    def __len__(self) -> int:
+        ...
+    def __repr__(self) -> str:
+        ...
+    def caret_rect(self, char_index: typing.SupportsInt | typing.SupportsIndex, origin: Point = ..., line_offset: typing.SupportsInt | typing.SupportsIndex = 0, thickness: typing.SupportsFloat | typing.SupportsIndex = 1.0) -> jtypeset._jtypeset.Rect | None:
+        """
+        キャレット矩形（文字の始端。行末なら終端）。範囲外は None
+        """
+    def char_boxes(self, line: typing.SupportsInt | typing.SupportsIndex, origin: Point = ..., line_offset: typing.SupportsInt | typing.SupportsIndex = 0) -> list[CharInfo]:
+        """
+        行 line の文字の箱（送り方向の順。ルビ等の注記は含まない）
+        """
+    def hit_test(self, point: Point, origin: Point = ..., line_offset: typing.SupportsInt | typing.SupportsIndex = 0) -> jtypeset._jtypeset.HitResult | None:
+        """
+        点 → 文字。行送りの箱の外なら None
+        """
+    def line_origin(self, line: typing.SupportsInt | typing.SupportsIndex, origin: Point = ..., line_offset: typing.SupportsInt | typing.SupportsIndex = 0) -> Point:
+        """
+        行 line の行頭（物理）
+        """
+    def origin_in_box(self, box: Rect, block_align: BlockAlign = ..., align: Align = ...) -> Point:
+        """
+        箱の中で天地（block_align）・左右（align）に揃えた origin を返す
+        """
+    def placeholder_rects(self, origin: Point = ..., line_offset: typing.SupportsInt | typing.SupportsIndex = 0) -> list[PlaceholderRect]:
+        ...
+    def rects_for(self, char_start: typing.SupportsInt | typing.SupportsIndex, char_end: typing.SupportsInt | typing.SupportsIndex, origin: Point = ..., line_offset: typing.SupportsInt | typing.SupportsIndex = 0) -> list[Rect]:
+        """
+        文字範囲 [char_start, char_end) を覆う矩形（行ごとに 1 つ）。リンク・選択範囲用
+        """
+    def render(self, size: Size, origin: Point, dpi: typing.SupportsFloat | typing.SupportsIndex = 144.0, background: Color = ..., line_offset: typing.SupportsInt | typing.SupportsIndex = 0, max_chars: typing.SupportsInt | typing.SupportsIndex = 18446744073709551615) -> tuple[int, int, bytes]:
+        """
+        size（pt）の面に origin から描いて (width, height, ARGB8888 bytes) を返す。max_chars で途中まで（段階表示）
+        """
+    def save_png(self, path: str, size: Size, origin: Point, dpi: typing.SupportsFloat | typing.SupportsIndex = 144.0, background: Color = ..., line_offset: typing.SupportsInt | typing.SupportsIndex = 0, max_chars: typing.SupportsInt | typing.SupportsIndex = 18446744073709551615) -> bool:
+        ...
+    @property
+    def block_extent(self) -> float:
+        """
+        全行が占める行送り方向の量（pt）
+        """
+    @property
+    def char_end(self) -> int:
+        ...
+    @property
+    def complete(self) -> bool:
+        ...
+    @property
+    def fits(self) -> bool:
+        """
+        fit_paragraph が行数上限に収められたか
+        """
+    @property
+    def line_pitch(self) -> float:
+        ...
+    @property
+    def lines(self) -> list[LineInfo]:
+        ...
+    @property
+    def scale(self) -> float:
+        """
+        fit_paragraph で縮めた倍率（1.0 なら縮めていない）
+        """
+    @property
+    def writing_mode(self) -> WritingMode:
+        ...
 class ParagraphStyle:
     """
     段落スタイル: 揃え・行送り・一字下げ・向き・空白保持（コード）・タブ幅・アキ量・行分割
@@ -819,10 +1474,34 @@ class ParagraphStyle:
     def copy(self) -> ParagraphStyle:
         ...
     @property
+    def direction(self) -> Direction:
+        """
+        基底方向（Direction）。RTL では Start / End が入れ替わる
+        """
+    @direction.setter
+    def direction(self, arg0: Direction) -> None:
+        ...
+    @property
+    def ellipsis(self) -> str:
+        """
+        行数上限で切れたときに末尾へ置く省略記号（"…"）
+        """
+    @ellipsis.setter
+    def ellipsis(self, arg0: str) -> None:
+        ...
+    @property
     def first_line_indent(self) -> float:
         ...
     @first_line_indent.setter
     def first_line_indent(self, arg0: typing.SupportsFloat | typing.SupportsIndex) -> None:
+        ...
+    @property
+    def hanging_indent(self) -> float:
+        """
+        2 行目以降の字下げ（em）
+        """
+    @hanging_indent.setter
+    def hanging_indent(self, arg0: typing.SupportsFloat | typing.SupportsIndex) -> None:
         ...
     @property
     def line_height(self) -> float:
@@ -837,10 +1516,39 @@ class ParagraphStyle:
     def line_pitch(self, arg0: typing.SupportsFloat | typing.SupportsIndex) -> None:
         ...
     @property
+    def rotation(self) -> float:
+        """
+        段落全体の回転（度。行頭を中心に時計回り）
+        """
+    @rotation.setter
+    def rotation(self, arg0: typing.SupportsFloat | typing.SupportsIndex) -> None:
+        ...
+    @property
+    def tab_stops(self) -> list[TabStop]:
+        """
+        タブストップ（TabStop のリスト）。空なら tab_width × em ごと。リストはコピーを返すので作って代入する
+        """
+    @tab_stops.setter
+    def tab_stops(self, arg0: collections.abc.Sequence[TabStop]) -> None:
+        ...
+    @property
     def tab_width(self) -> int:
         ...
     @tab_width.setter
     def tab_width(self, arg0: typing.SupportsInt | typing.SupportsIndex) -> None:
+        ...
+class PlaceholderRect:
+    """
+    プレースホルダの位置（id・文字位置・物理矩形）
+    """
+    @property
+    def char_index(self) -> int:
+        ...
+    @property
+    def id(self) -> str:
+        ...
+    @property
+    def rect(self) -> Rect:
         ...
 class Point:
     """
@@ -999,22 +1707,133 @@ class SpacingOptions:
     @kanji_skip_stretch.setter
     def kanji_skip_stretch(self, arg0: typing.SupportsFloat | typing.SupportsIndex) -> None:
         ...
+    @property
+    def kinsoku(self) -> KinsokuLevel:
+        """
+        禁則の強さ（KinsokuLevel）
+        """
+    @kinsoku.setter
+    def kinsoku(self, arg0: KinsokuLevel) -> None:
+        ...
+    @property
+    def line_end_allowed(self) -> str:
+        """
+        行末禁則から外す文字
+        """
+    @line_end_allowed.setter
+    def line_end_allowed(self, arg0: str) -> None:
+        ...
+    @property
+    def line_end_prohibited(self) -> str:
+        """
+        行末に置かない文字を足す
+        """
+    @line_end_prohibited.setter
+    def line_end_prohibited(self, arg0: str) -> None:
+        ...
+    @property
+    def line_start_allowed(self) -> str:
+        """
+        行頭禁則から外す文字
+        """
+    @line_start_allowed.setter
+    def line_start_allowed(self, arg0: str) -> None:
+        ...
+    @property
+    def line_start_prohibited(self) -> str:
+        """
+        行頭に置かない文字を足す
+        """
+    @line_start_prohibited.setter
+    def line_start_prohibited(self, arg0: str) -> None:
+        ...
+    @property
+    def weak_kinsoku_penalty(self) -> float:
+        """
+        弱い禁則のペナルティ
+        """
+    @weak_kinsoku_penalty.setter
+    def weak_kinsoku_penalty(self, arg0: typing.SupportsFloat | typing.SupportsIndex) -> None:
+        ...
 class Stroke:
     """
     線の描き方（色・幅・端・角）
     """
-    color: Color
+    color: Paint
     @typing.overload
     def __init__(self) -> None:
         ...
     @typing.overload
-    def __init__(self, color: Color, width: typing.SupportsFloat | typing.SupportsIndex = 1.0) -> None:
+    def __init__(self, color: Paint, width: typing.SupportsFloat | typing.SupportsIndex = 1.0) -> None:
         ...
     @property
     def width(self) -> float:
         ...
     @width.setter
     def width(self, arg0: typing.SupportsFloat | typing.SupportsIndex) -> None:
+        ...
+class TabAlign:
+    """
+    タブストップの揃え
+    
+    Members:
+    
+      LEFT
+    
+      CENTER
+    
+      RIGHT
+    
+      DECIMAL
+    """
+    CENTER: typing.ClassVar[TabAlign]  # value = <TabAlign.CENTER: 1>
+    DECIMAL: typing.ClassVar[TabAlign]  # value = <TabAlign.DECIMAL: 3>
+    LEFT: typing.ClassVar[TabAlign]  # value = <TabAlign.LEFT: 0>
+    RIGHT: typing.ClassVar[TabAlign]  # value = <TabAlign.RIGHT: 2>
+    __members__: typing.ClassVar[dict[str, TabAlign]]  # value = {'LEFT': <TabAlign.LEFT: 0>, 'CENTER': <TabAlign.CENTER: 1>, 'RIGHT': <TabAlign.RIGHT: 2>, 'DECIMAL': <TabAlign.DECIMAL: 3>}
+    def __eq__(self, other: typing.Any) -> bool:
+        ...
+    def __getstate__(self) -> int:
+        ...
+    def __hash__(self) -> int:
+        ...
+    def __index__(self) -> int:
+        ...
+    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
+        ...
+    def __int__(self) -> int:
+        ...
+    def __ne__(self, other: typing.Any) -> bool:
+        ...
+    def __repr__(self) -> str:
+        ...
+    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
+        ...
+    def __str__(self) -> str:
+        ...
+    @property
+    def name(self) -> str:
+        ...
+    @property
+    def value(self) -> int:
+        ...
+class TabStop:
+    """
+    タブストップ（行頭からの位置 pt・揃え・小数点揃えの文字）
+    """
+    align: TabAlign
+    decimal_char: str
+    @typing.overload
+    def __init__(self) -> None:
+        ...
+    @typing.overload
+    def __init__(self, position: typing.SupportsFloat | typing.SupportsIndex, align: TabAlign = ..., decimal_char: str = '.') -> None:
+        ...
+    @property
+    def position(self) -> float:
+        ...
+    @position.setter
+    def position(self, arg0: typing.SupportsFloat | typing.SupportsIndex) -> None:
         ...
 class TableBlock:
     """
@@ -1142,6 +1961,195 @@ class TableRow:
     @cells.setter
     def cells(self, arg0: collections.abc.Sequence[TableCell]) -> None:
         ...
+class TagLink:
+    """
+    リンクの範囲（名前と本文の文字範囲）
+    """
+    @property
+    def end(self) -> int:
+        ...
+    @property
+    def name(self) -> str:
+        ...
+    @property
+    def start(self) -> int:
+        ...
+class TagMarker:
+    """
+    タイミング等のマーカー（種類・値・本文での位置）
+    """
+    @property
+    def char_index(self) -> int:
+        ...
+    @property
+    def kind(self) -> str:
+        ...
+    @property
+    def value(self) -> str:
+        ...
+class TagParseOptions:
+    """
+    タグ記法の解釈の設定（基準スタイル・段落スタイル・名前付きスタイル／family・置換）
+    """
+    base_style: TextStyle
+    keep_unknown_tags: bool
+    paragraph_style: ParagraphStyle
+    def __init__(self) -> None:
+        ...
+    @property
+    def evaluate(self) -> collections.abc.Callable[[str], str]:
+        """
+        <eval name="…"> の置換（名前 → 文字列）
+        """
+    @evaluate.setter
+    def evaluate(self, arg0: collections.abc.Callable[[str], str]) -> None:
+        ...
+    @property
+    def graph_default_size(self) -> float:
+        ...
+    @graph_default_size.setter
+    def graph_default_size(self, arg0: typing.SupportsFloat | typing.SupportsIndex) -> None:
+        ...
+    @property
+    def named_families(self) -> dict[str, list[str]]:
+        """
+        <font face="…"> の family 列
+        """
+    @named_families.setter
+    def named_families(self, arg0: collections.abc.Mapping[str, collections.abc.Sequence[str]]) -> None:
+        ...
+    @property
+    def named_styles(self) -> dict[str, TextStyle]:
+        """
+        <style name="…"> で引くスタイル
+        """
+    @named_styles.setter
+    def named_styles(self, arg0: collections.abc.Mapping[str, TextStyle]) -> None:
+        ...
+    @property
+    def sub_offset(self) -> float:
+        ...
+    @sub_offset.setter
+    def sub_offset(self, arg0: typing.SupportsFloat | typing.SupportsIndex) -> None:
+        ...
+    @property
+    def sup_offset(self) -> float:
+        ...
+    @sup_offset.setter
+    def sup_offset(self, arg0: typing.SupportsFloat | typing.SupportsIndex) -> None:
+        ...
+    @property
+    def sup_scale(self) -> float:
+        ...
+    @sup_scale.setter
+    def sup_scale(self, arg0: typing.SupportsFloat | typing.SupportsIndex) -> None:
+        ...
+class TagParseResult:
+    """
+    parse_tagged_text の結果（段落・マーカー・リンク・プレースホルダ・エラー）
+    """
+    @property
+    def errors(self) -> list[str]:
+        ...
+    @property
+    def links(self) -> list[TagLink]:
+        ...
+    @property
+    def markers(self) -> list[TagMarker]:
+        ...
+    @property
+    def paragraph(self) -> Paragraph:
+        ...
+    @property
+    def placeholders(self) -> list[TagPlaceholder]:
+        ...
+class TagPlaceholder:
+    """
+    <graph> で置いた行内プレースホルダ
+    """
+    @property
+    def char_index(self) -> int:
+        ...
+    @property
+    def name(self) -> str:
+        ...
+    @property
+    def size(self) -> Size:
+        ...
+class TextDecoration:
+    """
+    下線・打消し線。色（無ければ fill）・太さ（0 でフォントのメトリクス）・位置の補正（em、文字から離れる向きが正）
+    """
+    color: jtypeset._jtypeset.Paint | None
+    @typing.overload
+    def __init__(self) -> None:
+        ...
+    @typing.overload
+    def __init__(self, color: jtypeset._jtypeset.Color | None = None, thickness: typing.SupportsFloat | typing.SupportsIndex = 0.0, offset: typing.SupportsFloat | typing.SupportsIndex = 0.0) -> None:
+        ...
+    @property
+    def offset(self) -> float:
+        ...
+    @offset.setter
+    def offset(self, arg0: typing.SupportsFloat | typing.SupportsIndex) -> None:
+        ...
+    @property
+    def thickness(self) -> float:
+        ...
+    @thickness.setter
+    def thickness(self, arg0: typing.SupportsFloat | typing.SupportsIndex) -> None:
+        ...
+class TextLayer:
+    """
+    文字の外観の 1 層（塗り・縁取り・ずらし・ぼかし）。TextStyle.layers に下から上の順で並べる
+    """
+    fill: jtypeset._jtypeset.Paint | None
+    stroke: jtypeset._jtypeset.Stroke | None
+    @typing.overload
+    def __init__(self) -> None:
+        ...
+    @typing.overload
+    def __init__(self, fill: jtypeset._jtypeset.Color | None = None, stroke: jtypeset._jtypeset.Stroke | None = None, offset: Point = ..., blur: typing.SupportsFloat | typing.SupportsIndex = 0.0) -> None:
+        ...
+    @property
+    def blur(self) -> float:
+        """
+        ぼかし半径（pt）。ラスタと SVG のみ
+        """
+    @blur.setter
+    def blur(self, arg0: typing.SupportsFloat | typing.SupportsIndex) -> None:
+        ...
+    @property
+    def offset(self) -> Point:
+        """
+        ずらし（pt、右・下が正）
+        """
+    @offset.setter
+    def offset(self, arg0: Point) -> None:
+        ...
+class TextMetrics:
+    """
+    measure_text の結果
+    """
+    @property
+    def advance(self) -> float:
+        """
+        送り方向の長さ（pt）
+        """
+    @property
+    def ascent(self) -> float:
+        """
+        中心線から注記側（横組み: 上）の張り出し
+        """
+    @property
+    def cluster_count(self) -> int:
+        ...
+    @property
+    def descent(self) -> float:
+        ...
+    @property
+    def glyph_count(self) -> int:
+        ...
 class TextOrientation:
     """
     Members:
@@ -1182,13 +2190,31 @@ class TextOrientation:
     @property
     def value(self) -> int:
         ...
+class TextShadow:
+    """
+    影（色・ずらし・ぼかし半径）。層の一番下に置かれる
+    """
+    color: Color
+    offset: Point
+    @typing.overload
+    def __init__(self) -> None:
+        ...
+    @typing.overload
+    def __init__(self, color: Color = ..., offset: Point = ..., blur: typing.SupportsFloat | typing.SupportsIndex = 0.0) -> None:
+        ...
+    @property
+    def blur(self) -> float:
+        ...
+    @blur.setter
+    def blur(self, arg0: typing.SupportsFloat | typing.SupportsIndex) -> None:
+        ...
 class TextStyle:
     """
-    文字スタイル: フォント・サイズ・色・縁取り・字間・向き・平体長体・合成ボールド／斜体・ベースラインのずらし
+    文字スタイル: フォント・サイズ・色・縁取り・影・層・下線・打消し線・字間・向き・平体長体・合成ボールド／斜体・ベースラインのずらし
     """
     fake_bold: bool
     fake_italic: bool
-    fill: Color
+    fill: Paint
     font: FontSpec
     language: str
     orientation: jtypeset._jtypeset.TextOrientation | None
@@ -1197,7 +2223,7 @@ class TextStyle:
     def __init__(self) -> None:
         ...
     @typing.overload
-    def __init__(self, family: collections.abc.Sequence[str], size: typing.SupportsFloat | typing.SupportsIndex = 10.0, fill: Color = ...) -> None:
+    def __init__(self, family: collections.abc.Sequence[str], size: typing.SupportsFloat | typing.SupportsIndex = 10.0, fill: Paint = ...) -> None:
         ...
     def copy(self) -> TextStyle:
         ...
@@ -1206,6 +2232,30 @@ class TextStyle:
         ...
     @baseline_shift.setter
     def baseline_shift(self, arg0: typing.SupportsFloat | typing.SupportsIndex) -> None:
+        ...
+    @property
+    def emoji_presentation(self) -> EmojiPresentation:
+        """
+        絵文字の表示形式（EmojiPresentation）
+        """
+    @emoji_presentation.setter
+    def emoji_presentation(self, arg0: EmojiPresentation) -> None:
+        ...
+    @property
+    def features(self) -> list[str]:
+        """
+        OpenType feature（['palt', '-liga', 'ss01'] など HarfBuzz の書式）。palt 等の字幅を変える feature を付けた文字は JLReq の約物の詰めを使わない
+        """
+    @features.setter
+    def features(self, arg0: collections.abc.Sequence[str]) -> None:
+        ...
+    @property
+    def layers(self) -> list[TextLayer]:
+        """
+        外観の層（TextLayer のリスト、下から上）。空なら fill / stroke の 1 層。属性はコピーを返すので、リストを作って代入する
+        """
+    @layers.setter
+    def layers(self, arg0: collections.abc.Sequence[TextLayer]) -> None:
         ...
     @property
     def letter_spacing(self) -> float:
@@ -1226,10 +2276,34 @@ class TextStyle:
     def scale_y(self, arg0: typing.SupportsFloat | typing.SupportsIndex) -> None:
         ...
     @property
+    def shadow(self) -> jtypeset._jtypeset.TextShadow | None:
+        """
+        影（TextShadow）。層の一番下に足す
+        """
+    @shadow.setter
+    def shadow(self, arg0: jtypeset._jtypeset.TextShadow | None) -> None:
+        ...
+    @property
     def size(self) -> float:
         ...
     @size.setter
     def size(self, arg0: typing.SupportsFloat | typing.SupportsIndex) -> None:
+        ...
+    @property
+    def strikethrough(self) -> jtypeset._jtypeset.TextDecoration | None:
+        """
+        打消し線（TextDecoration）
+        """
+    @strikethrough.setter
+    def strikethrough(self, arg0: jtypeset._jtypeset.TextDecoration | None) -> None:
+        ...
+    @property
+    def underline(self) -> jtypeset._jtypeset.TextDecoration | None:
+        """
+        下線（TextDecoration）。縦組みでは右側の傍線
+        """
+    @underline.setter
+    def underline(self, arg0: jtypeset._jtypeset.TextDecoration | None) -> None:
         ...
 class TocBlock:
     """
@@ -1303,6 +2377,51 @@ class VAlign:
     @property
     def value(self) -> int:
         ...
+class WrapMode:
+    """
+    折返しの方式: MIXED（和文は字ごと・欧文は語ごと）/ CHAR（欧文の語中でも切る）/ WORD（和文も語でだけ切る）/ NONE（折り返さない）
+    
+    Members:
+    
+      MIXED
+    
+      CHAR
+    
+      WORD
+    
+      NONE
+    """
+    CHAR: typing.ClassVar[WrapMode]  # value = <WrapMode.CHAR: 1>
+    MIXED: typing.ClassVar[WrapMode]  # value = <WrapMode.MIXED: 0>
+    NONE: typing.ClassVar[WrapMode]  # value = <WrapMode.NONE: 3>
+    WORD: typing.ClassVar[WrapMode]  # value = <WrapMode.WORD: 2>
+    __members__: typing.ClassVar[dict[str, WrapMode]]  # value = {'MIXED': <WrapMode.MIXED: 0>, 'CHAR': <WrapMode.CHAR: 1>, 'WORD': <WrapMode.WORD: 2>, 'NONE': <WrapMode.NONE: 3>}
+    def __eq__(self, other: typing.Any) -> bool:
+        ...
+    def __getstate__(self) -> int:
+        ...
+    def __hash__(self) -> int:
+        ...
+    def __index__(self) -> int:
+        ...
+    def __init__(self, value: typing.SupportsInt | typing.SupportsIndex) -> None:
+        ...
+    def __int__(self) -> int:
+        ...
+    def __ne__(self, other: typing.Any) -> bool:
+        ...
+    def __repr__(self) -> str:
+        ...
+    def __setstate__(self, state: typing.SupportsInt | typing.SupportsIndex) -> None:
+        ...
+    def __str__(self) -> str:
+        ...
+    @property
+    def name(self) -> str:
+        ...
+    @property
+    def value(self) -> int:
+        ...
 class WritingMode:
     """
     Members:
@@ -1343,19 +2462,35 @@ class WritingMode:
     @property
     def value(self) -> int:
         ...
+def fit_paragraph(fonts: FontSet, paragraph: Paragraph, writing_mode: WritingMode, max_lines: typing.SupportsInt | typing.SupportsIndex, line_lengths: collections.abc.Sequence[typing.SupportsFloat | typing.SupportsIndex] = [], default_length: typing.SupportsFloat | typing.SupportsIndex = 200.0, min_scale: typing.SupportsFloat | typing.SupportsIndex = 0.5, step: typing.SupportsFloat | typing.SupportsIndex = 0.05000000074505806) -> ParagraphLayout:
+    """
+    行数上限に収まるまで文字サイズを段階的に縮めて組む（吹き出しのフィット）。ParagraphLayout の scale / fits を見る
+    """
 def image_from_rgba(width: typing.SupportsInt | typing.SupportsIndex, height: typing.SupportsInt | typing.SupportsIndex, rgba: bytes) -> Image:
     ...
-def layout_paragraph(fonts: FontSet, paragraph: Paragraph, writing_mode: WritingMode, line_lengths: collections.abc.Sequence[typing.SupportsFloat | typing.SupportsIndex] = [], default_length: typing.SupportsFloat | typing.SupportsIndex = 200.0) -> list[LineInfo]:
+def layout_paragraph(fonts: FontSet, paragraph: Paragraph, writing_mode: WritingMode, line_lengths: collections.abc.Sequence[typing.SupportsFloat | typing.SupportsIndex] = [], default_length: typing.SupportsFloat | typing.SupportsIndex = 200.0) -> ParagraphLayout:
     """
-    段落を組んで行ごとの文字範囲と長さを返す（行長は行ごとに指定できる = \\parshape）
+    段落を組んで ParagraphLayout（行ごとの文字範囲と長さ＋取り出し口）を返す（行長は行ごとに指定できる = \\parshape）
     """
 def load_image(path: str) -> Image:
     """
     PNG / JPEG / BMP / GIF を読む
     """
+def measure_text(fonts: FontSet, text: str, style: TextStyle, writing_mode: WritingMode = ...) -> TextMetrics:
+    """
+    折り返さない 1 行の計測（送り・張り出し・クラスタ数）
+    """
+def parse_tagged_text(text: str, options: TagParseOptions) -> TagParseResult:
+    """
+    タグ付きテキスト（richtext 互換）を段落にする。<b> <i> <u> <s> <sup> <sub> <font> <color> <outline> <shadow> <style> <ruby> <emphasis> <tcy> <warichu> <jidori> <link> <graph> <br> <sp> <eval> とタイミング系（<start> <delay> <wait> <sync> <keywait>）
+    """
 def save_pdf(pages: collections.abc.Sequence[Page], path: str, title: str = '', author: str = '', subset_fonts: bool = True, compress: bool = True) -> tuple[bool, list[str]]:
     """
     ページ列を 1 つの PDF に書く。(ok, warnings) を返す
+    """
+def strip_tags(text: str) -> str:
+    """
+    タグを取り除いた本文を返す
     """
 def superscript_style(style: TextStyle) -> TextStyle:
     """

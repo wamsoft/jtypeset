@@ -18,12 +18,13 @@
  * 対応するタグ（richtext と同じ名前・属性）:
  *
  *  文字スタイル
- *   `<font size= weight= face= spacing= width= italic=>`  サイズ（pt）・ウェイト・family・字間（em）・平体（倍率）
+ *   `<font size= weight= face= spacing= width= height= italic= language=>`
+ *                                                         サイズ（pt）・ウェイト・family・字間（em）・平体／長体（倍率）・斜体・言語
  *   `<b>` `<strong>` / `<i>` `<em>`                       太字 / 斜体
  *   `<u>` / `<s>` `<strike>` `<del>`                      下線 / 打消し線
  *   `<sup>` / `<sub>`                                     上付き / 下付き
  *   `<color value="#rrggbb">` または `<color r= g= b= a=>` 文字色
- *   `<outline color= width= x= y= [add]>`                 縁取り（add で層を重ねる = 二重縁取り）
+ *   `<outline color= width= [add]>`                       縁取り（add で層を重ねる = 二重縁取り）
  *   `<shadow color= x= y= [blur=] [add]>`                 影（blur は typeset の拡張）
  *   `<style name="...">`                                  名前付きスタイル（TagParseOptions::namedStyles）
  *
@@ -38,7 +39,8 @@
  *   `<start>` `<delay>` `<wait>` `<sync>` `<keywait>`      マーカー（結果の markers に位置で返る。B11）
  *   `<eval name= alt=>`                                   置換（TagParseOptions::evaluate で文字列を返す）
  *
- * 実体参照は `&lt; &gt; &amp; &quot; &apos;`。`<` が閉じないときはそのままの文字として扱う。
+ * 実体参照は `&lt; &gt; &amp; &quot; &apos;` と数値参照 `&#nnn; &#xhhh;`。
+ * `<` で始まってもタグとして読めないもの（`1 < 2` など）はそのままの文字として扱う。
  */
 namespace typeset::inl {
 

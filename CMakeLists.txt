@@ -128,6 +128,15 @@ if(TYPESET_BUILD_SAMPLES)
 
     add_executable(sample_report samples/sample_report.cpp)
     target_link_libraries(sample_report PRIVATE typeset)
+
+    add_executable(sample_text_style samples/sample_text_style.cpp)
+    target_link_libraries(sample_text_style PRIVATE typeset)
+
+    add_executable(sample_game samples/sample_game.cpp)
+    target_link_libraries(sample_game PRIVATE typeset)
+
+    add_executable(sample_intl samples/sample_intl.cpp)
+    target_link_libraries(sample_intl PRIVATE typeset)
 endif()
 
 #------------------------------------------------------------------------------

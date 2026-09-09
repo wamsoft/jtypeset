@@ -3,12 +3,14 @@
 ## 依存
 
 - C++17 コンパイラ（MSVC 2022 / GCC 9+ / Clang）、CMake 3.24+、Ninja（preset が使う）
-- [vcpkg](https://github.com/microsoft/vcpkg): FreeType / HarfBuzz（subset 含む）/ libunibreak / zlib / stb / doctest を
+- [vcpkg](https://github.com/microsoft/vcpkg): FreeType / HarfBuzz（subset 含む）/ libunibreak / zlib / stb / doctest / tinyxml2（MicroTeX が使う）を
   `vcpkg.json`（manifest）から入れる。`VCPKG_ROOT` を設定しておく
 - [glyphware](https://github.com/wamsoft/glyphware)（FreeType + HarfBuzz の包み）: CMake の FetchContent で自動取得。
   開発中は `GLYPHWARE_DIR=/path/to/glyphware` でローカルツリーを指せる
 - Python バインディング: Python 3.9+ と `pip install pybind11`
-- テスト・サンプル用フォント: `make fontdata`（Noto Serif/Sans JP、Noto Serif/Sans、絵文字の Noto-COLRv1 / NotoColorEmoji を `data/` にダウンロード）
+- テスト・サンプル用フォント: `make fontdata`（Noto Serif/Sans JP とその Bold、Noto Serif/Sans（Bold・Italic・可変版）、
+  アラビア文字・ヘブライ文字の Noto Sans、絵文字の Noto-COLRv1 / NotoColorEmoji、
+  それに欧文ハイフネーションのパターン `hyph-en-us.tex` を `data/` にダウンロードする）
 
 ## 手順
 
@@ -56,6 +58,10 @@ pip install dist/jtypeset-*.whl
 
 Windows では `x64-windows-static-md`（静的ライブラリ＋動的 CRT）で wheel を作ります（pyproject の override）。
 DLL を同梱しなくてよく、Python 本体と CRT が一致します。
+
+配布用の wheel は GitHub Actions（`.github/workflows/wheels.yml`）が cibuildwheel で作ります。
+対象は Windows (AMD64) / Linux (manylinux_2_28 x86_64) / macOS (arm64・x86_64) の CPython 3.9〜3.13 で、
+macOS の x86_64 は Apple Silicon のランナーからクロスビルドします。
 
 ## ドキュメントの生成
 

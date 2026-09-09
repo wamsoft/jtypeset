@@ -9,15 +9,17 @@ C++17 ライブラリです。Python パッケージ **jtypeset** から使え�
 - 見出しの採番と PDF のしおり、目次、索引、図表番号と相互参照、脚注、箇条書き、コードブロック、表（ページまたぎ・rowspan）、
   画像の回り込み、段組と段抜き、柱・ノンブル
 - LaTeX 数式（同梱の MicroTeX。数式フォントのグリフとして PDF に埋め込む）と、グラフなど外部レンダラの出力（SVG）の差し込み
+- 文字の装飾（下線・打消し線・影・二重縁取り・グラデーション）、欧文のハイフネーション、双方向テキスト（アラビア文字・ヘブライ文字）
 - フォントはファイルから直接読み、PDF にはサブセットで埋め込む（埋め込み許可 fsType を確認）。カラー絵文字（COLR / ビットマップ）も PDF / SVG / PNG で同じ色に
+- ゲーム向けのタグ記法（`<b>` `<ruby>` `<color>` `<outline>` `<link>` …）と、リンク・ヒットテスト・キャレット・段階表示のための取り出し口
 
-想定している用途は台本・小説・技術文書・レポートなどのツール作りです。詳しい説明は
+想定している用途は台本・小説・技術文書・レポート、それにゲームのテキスト表示などのツール作りです。詳しい説明は
 **[ドキュメントサイト](https://wamsoft.github.io/jtypeset/)** にあります（Markdown → PDF の手引き、C++ / Python のリファレンス）。
 
 ## Python 版（jtypeset）の入手と使い方
 
 ```bash
-pip install jtypeset                   # 本体
+pip install jtypeset                   # 本体（Windows / Linux / macOS の CPython 3.9〜3.13 の wheel）
 pip install "jtypeset[md]"             # Markdown → PDF（markdown-it-py など）
 pip install "jtypeset[md,highlight]"   # + Pygments（コードブロックの色付け。無くても単色で組める）
 ```
@@ -51,7 +53,7 @@ toc: true
 見出し・箇条書き・表・画像・脚注・数式（`$…$`）・ルビ・`<!-- pagebreak -->`・`[toc]`・`[index]` に対応しています。
 一覧と例は [Markdown → PDF の手引き](https://wamsoft.github.io/jtypeset/markdown/) と
 [`samples/markdown/report.md`](samples/markdown/report.md) を参照してください。
-フォントを指定しなければ OS のフォント（Windows: 游明朝／游ゴシック、macOS: ヒラギノ、Linux: Noto CJK）を探します。
+フォントを指定しなければ、カレントの `data/` の Noto → OS のフォント（Windows: 游明朝／游ゴシック、macOS: ヒラギノ、Linux: Noto CJK）の順に探します。
 
 ### Python API
 
@@ -81,7 +83,7 @@ pages[0].save_png("neko_p1.png", dpi=144)
 
 ## ビルド（C++ ライブラリ・開発者向け）
 
-依存は [vcpkg](https://github.com/microsoft/vcpkg) で入れます（FreeType / HarfBuzz / libunibreak / zlib / stb / doctest）。
+依存は [vcpkg](https://github.com/microsoft/vcpkg) で入れます（FreeType / HarfBuzz（subset 込み）/ libunibreak / zlib / stb / doctest / tinyxml2）。
 フォント層の [glyphware](https://github.com/wamsoft/glyphware) は CMake の FetchContent で取得します（開発中は `GLYPHWARE_DIR` でローカルツリーを指せます）。
 
 ```bash
@@ -100,9 +102,12 @@ make test                                       # ctest（doctest）
 - MicroTeX（LaTeX 数式）は既定でビルドされ Python 拡張にも入る（`-DTYPESET_HANDLER_MICROTEX=OFF` で外せる）
 - リファレンス: `make docs`（Doxygen）、`make pydocs`（型スタブ＋ pdoc）、`make site`（MkDocs でドキュメントサイトを `build/site` に）
 
-サンプル: `sample_inline`（縦横同一文）、`sample_script`（台本）、`sample_novel`（小説 2 段）、`sample_tech`（技術文書）、
-`sample_report`（レポート: 目次・採番・図表番号・脚注・索引）、`sample_objects`（外部オブジェクト）。
-出力 `output_*.png/.pdf/.svg` はリポジトリルートに出ます。詳細は [ビルド](https://wamsoft.github.io/jtypeset/build/)。
+サンプル（`make samples` でまとめて実行）: `sample_dl`（表示リスト直書き）、`sample_inline`（縦横同一文）、
+`sample_script`（台本）、`sample_novel`（小説 2 段）、`sample_tech`（技術文書）、
+`sample_report`（レポート: 目次・採番・図表番号・脚注・索引）、`sample_objects`（外部オブジェクト）、
+`sample_text_style`（装飾とフォント）、`sample_game`（タグ記法と取り出し口）、`sample_intl`（多言語・ハイフネーション）。
+出力 `output_*.png/.pdf/.svg` はリポジトリルートに出ます。
+一覧と画像は [サンプル](https://wamsoft.github.io/jtypeset/samples/)、詳細は [ビルド](https://wamsoft.github.io/jtypeset/build/)。
 
 ## 技術解説
 

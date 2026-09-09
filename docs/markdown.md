@@ -89,6 +89,7 @@ hyphenation: hyph-en-us.tex   # 欧文のハイフネーション（TeX のパ�
 kinsoku: strict           # strict / normal / loose（禁則の強さ。狭い段では normal / loose で行末が揃いやすい）
 ruby-offset: 0            # ルビと親文字の間隔（親文字の em）
 columns: 1
+column-gap: 0             # 段間（pt。0 で既定）
 margin: 20                # mm。{top: 25, bottom: 20, inner: 22, outer: 18} も可
 fonts:                    # フォントファイル（相対パスは Markdown の場所から）
   - fonts/NotoSerifJP-Regular.otf
@@ -96,6 +97,7 @@ fonts:                    # フォントファイル（相対パスは Markdown 
   - {path: C:/Windows/Fonts/YuGothM.ttc, key: yugo, index: 0}
   - {path: fonts/NotoSerifJP-Bold.otf, key: serif-b, family: [serif], weight: 700}   # 同じ family の太字（**強調** で使われる）
   - {path: fonts/NotoSansSC-Regular.otf, key: sans-sc, languages: [zh]}             # 中国語のテキストで先に試す
+  - {path: fonts/big.otf, key: big, lazy: true}    # lazy: true でも初回使用時まで開かない
 font-languages: {zh: [sans-sc]}   # 言語 → 先に試す family（宣言の languages と同じ意味）
 font-body: [serif]        # 本文の family（キー）。最初に無い字は次へフォールバック
 font-heading: [sans]
@@ -108,7 +110,7 @@ toc: true                 # 先頭に目次（本文の [toc] でも置ける）
 toc-depth: 2
 numbering: true           # 見出しの採番（1. / 1.1 / 1.1.1）
 heading-page-break: 0     # このレベル以下の見出しで改ページ（1 なら章ごとに改ページ）
-header: "{title}"         # 柱。null で無し
+header: "{title}"         # 柱。"" （空文字）で無し。null は既定（題名）と同じ
 footer: "{page} / {pages}"
 links: footnote           # footnote / inline / none
 math:
@@ -225,7 +227,7 @@ $$ (eq-gauss)
 ```
 
 既定では同梱の **MicroTeX**（LaTeX 数式のレンダラ）が組み、数式のグリフは数式フォント（Computer Modern 系）として PDF に埋め込まれます。
-分数・根号・積分・総和・行列（`pmatrix`）・場合分け（`cases`）・ギリシャ文字・`\mathbf` `	ext{}` などが使えます。
+分数・根号・積分・総和・行列（`pmatrix`）・場合分け（`cases`）・ギリシャ文字・`\mathbf` `\text{}` などが使えます。
 `math` でハンドラを切り替えられます（無い環境では `[tex]` の代替テキストになるだけで、組版は止まりません）。
 
 - `math: {handler: auto}`（既定）— MicroTeX があればそれ、無ければ何もしない

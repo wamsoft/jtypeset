@@ -1,7 +1,7 @@
 SHELL = /bin/bash
 
-# fontdata ターゲットは VCPKG_ROOT 不要
-ifeq ($(filter fontdata,$(MAKECMDGOALS)),)
+# ビルドを伴わないターゲット（fontdata / サンプル実行 / ドキュメント）は VCPKG_ROOT 不要
+ifeq ($(filter fontdata samples samples-docs samples-md,$(MAKECMDGOALS)),)
 ifeq ($(VCPKG_ROOT),)
 $(error Variables VCPKG_ROOT not set correctly.)
 endif
@@ -40,7 +40,7 @@ endif
 
 BUILD_PATH=$(shell cmake --preset $(PRESET) -N | grep BUILD_DIR | sed 's/.*BUILD_DIR="\(.*\)"/\1/')
 
-.PHONY: prebuild build clean test fontdata docs pydocs site samples-md
+.PHONY: prebuild build clean test fontdata docs pydocs site samples samples-docs samples-md
 
 all: build
 
@@ -70,10 +70,10 @@ docs:
 # 事前に pip install pdoc pybind11-stubgen。ビルド済みの python パッケージを読む
 PYPKG=$(BUILD_PATH)/python/$(BUILD_TYPE)
 pydocs:
-	PYTHONPATH=$(PYPKG) pybind11-stubgen typeset._jtypeset -o python --ignore-all-errors
-	cp -r python/jtypeset/_jtypeset $(PYPKG)/typeset/
+	PYTHONPATH=$(PYPKG) pybind11-stubgen jtypeset._jtypeset -o python --ignore-all-errors
+	cp -r python/jtypeset/_jtypeset $(PYPKG)/jtypeset/
 	mkdir -p build/docs
-	PYTHONPATH=$(PYPKG) pdoc typeset -o build/docs/python --no-show-source
+	PYTHONPATH=$(PYPKG) pdoc jtypeset -o build/docs/python --no-show-source
 
 # ドキュメントサイト（MkDocs + Doxygen + pdoc）→ build/site。docs と pydocs を先に実行しておく
 site:
@@ -81,6 +81,16 @@ site:
 	mkdir -p build/site/cpp build/site/python
 	cp -r build/docs/cpp/html build/site/cpp/
 	cp -r build/docs/python/. build/site/python/
+
+# C++ のサンプルをまとめて実行する（リポジトリルートで動かす前提。出力はルートに出る）
+samples:
+	@for s in sample_dl sample_inline sample_script sample_novel sample_tech sample_report sample_objects 	          sample_text_style sample_game sample_intl; do 	    exe=$$(find build/$(PRESET) -name "$$s" -o -name "$$s.exe" | head -1); 	    if [ -n "$$exe" ]; then echo "--- $$s"; "$$exe" || exit 1; else echo "--- $$s (not built)"; fi; 	done
+
+# ドキュメント用のサンプル画像（C++ サンプルの PNG を縮小して docs/samples へ）
+samples-docs: samples
+	magick output_text_style.png -resize 720x -strip docs/samples/sample_text_style.png
+	magick output_game.png -resize 720x -strip docs/samples/sample_game.png
+	magick output_intl.png -resize 720x -strip docs/samples/sample_intl.png
 
 # ドキュメント用のサンプル PDF（Markdown と対になるもの）を再生成する。ビルド済みの python パッケージと data/ のフォントを使う
 samples-md:
