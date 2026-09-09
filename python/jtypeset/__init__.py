@@ -17,7 +17,7 @@ for _name in dir(_ext):
 __all__.append("md")
 del _name
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 
 def microtex_res_dir() -> str:

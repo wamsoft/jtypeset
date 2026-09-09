@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "jtypeset"
-version = "0.1.0"
+version = "0.2.0"
 description = "jtypeset: Japanese typesetting (vertical/horizontal, JLReq) with raster / PDF / SVG output and Markdown → PDF — C++17 core (typeset) with pybind11 bindings"
 readme = "README.md"
 license = "MIT"
