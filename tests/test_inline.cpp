@@ -58,6 +58,20 @@ TEST_CASE("char classes") {
     CHECK(text::isLineEndProhibited(text::getCharClass(U'（')));
     const text::GlueSpec g = text::getSpacing(text::CharClass::FullStop, text::CharClass::Hiragana);
     CHECK(g.natural == doctest::Approx(0.5f));
+    // 和欧間アキ（四分）は漢字・仮名と欧文の間だけ。括弧類・句読点・区切り約物と欧文の間はベタ（表 3）
+    using CC = text::CharClass;
+    CHECK(text::getSpacing(CC::Ideographic, CC::Western).natural == doctest::Approx(0.25f));
+    CHECK(text::getSpacing(CC::Western, CC::Hiragana).natural == doctest::Approx(0.25f));
+    CHECK(text::getSpacing(CC::OpenBracket, CC::Western).natural == 0.0f);
+    CHECK(text::getSpacing(CC::Western, CC::CloseBracket).natural == 0.0f);
+    CHECK(text::getSpacing(CC::Western, CC::FullStop).natural == 0.0f);
+    CHECK(text::getSpacing(CC::Western, CC::Comma).natural == 0.0f);
+    CHECK(text::getSpacing(CC::Western, CC::Dividing).natural == 0.0f);
+    CHECK(text::getSpacing(CC::Western, CC::IdeographicSpace).natural == 0.0f);
+    // 欧文 → 始め括弧類、終わり括弧類 → 欧文は括弧側の二分アキ
+    CHECK(text::getSpacing(CC::Western, CC::OpenBracket).natural == doctest::Approx(0.5f));
+    CHECK(text::getSpacing(CC::CloseBracket, CC::Western).natural == doctest::Approx(0.5f));
+    CHECK(text::getSpacing(CC::MiddleDot, CC::Western).natural == doctest::Approx(0.25f));
 }
 
 TEST_CASE("UAX#14 opportunities via libunibreak") {

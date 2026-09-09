@@ -36,6 +36,22 @@ bool absorbsPrecedingSpace(CharClass c) {
     }
 }
 
+/// 和欧間アキの対象になる和字（約物・和字間隔を除く）
+bool isJapaneseText(CharClass c) {
+    switch (c) {
+    case CharClass::OpenBracket:
+    case CharClass::CloseBracket:
+    case CharClass::Dividing:
+    case CharClass::MiddleDot:
+    case CharClass::FullStop:
+    case CharClass::Comma:
+    case CharClass::IdeographicSpace:
+        return false;
+    default:
+        return isJapanese(c);
+    }
+}
+
 } // namespace
 
 GlueSpec getSpacing(CharClass before, CharClass after) {
@@ -77,8 +93,10 @@ GlueSpec getSpacing(CharClass before, CharClass after) {
     }
 
     // --- 和欧間は四分アキ ---
-    if (isJapanese(before) && isWestern(after)) return kLatinGap;
-    if (isWestern(before) && isJapanese(after)) return kLatinGap;
+    // 約物との間には入れない（始め括弧類 → 欧文、欧文 → 終わり括弧類・句読点・区切り約物はベタ。表 3）。
+    // 和字間隔（全角空白）も既にアキなので入れない
+    if (isJapaneseText(before) && isWestern(after)) return kLatinGap;
+    if (isWestern(before) && isJapaneseText(after)) return kLatinGap;
 
     return kNone;
 }
