@@ -93,6 +93,37 @@ Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
              py::arg("color"), py::arg("width") = 1.0f)
         .def_readwrite("color", &Stroke::color)
         .def_readwrite("width", &Stroke::width);
+    py::class_<TextLayer>(m, "TextLayer",
+                          "文字の外観の 1 層（塗り・縁取り・ずらし・ぼかし）。TextStyle.layers に下から上の順で並べる")
+        .def(py::init<>())
+        .def(py::init([](std::optional<Color> fill, std::optional<Stroke> stroke, Point offset, Pt blur) {
+                 TextLayer l; l.fill = fill; l.stroke = stroke; l.offset = offset; l.blur = blur; return l;
+             }),
+             py::arg("fill") = std::nullopt, py::arg("stroke") = std::nullopt,
+             py::arg("offset") = Point{0.0f, 0.0f}, py::arg("blur") = 0.0f)
+        .def_readwrite("fill", &TextLayer::fill)
+        .def_readwrite("stroke", &TextLayer::stroke)
+        .def_readwrite("offset", &TextLayer::offset, "ずらし（pt、右・下が正）")
+        .def_readwrite("blur", &TextLayer::blur, "ぼかし半径（pt）。ラスタと SVG のみ");
+    py::class_<TextShadow>(m, "TextShadow", "影（色・ずらし・ぼかし半径）。層の一番下に置かれる")
+        .def(py::init<>())
+        .def(py::init([](Color color, Point offset, Pt blur) {
+                 TextShadow s; s.color = color; s.offset = offset; s.blur = blur; return s;
+             }),
+             py::arg("color") = Color{0, 0, 0, 128}, py::arg("offset") = Point{1.0f, 1.0f}, py::arg("blur") = 0.0f)
+        .def_readwrite("color", &TextShadow::color)
+        .def_readwrite("offset", &TextShadow::offset)
+        .def_readwrite("blur", &TextShadow::blur);
+    py::class_<TextDecoration>(m, "TextDecoration",
+                               "下線・打消し線。色（無ければ fill）・太さ（0 でフォントのメトリクス）・位置の補正（em、文字から離れる向きが正）")
+        .def(py::init<>())
+        .def(py::init([](std::optional<Color> color, Pt thickness, float offset) {
+                 TextDecoration d; d.color = color; d.thickness = thickness; d.offset = offset; return d;
+             }),
+             py::arg("color") = std::nullopt, py::arg("thickness") = 0.0f, py::arg("offset") = 0.0f)
+        .def_readwrite("color", &TextDecoration::color)
+        .def_readwrite("thickness", &TextDecoration::thickness)
+        .def_readwrite("offset", &TextDecoration::offset);
 
     // ---- 列挙 ----
     py::enum_<WritingMode>(m, "WritingMode")
@@ -140,7 +171,7 @@ Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
         .def_readwrite("weight", &FontSpec::weight)
         .def_readwrite("italic", &FontSpec::italic);
 
-    py::class_<TextStyle>(m, "TextStyle", "文字スタイル: フォント・サイズ・色・縁取り・字間・向き・平体長体・合成ボールド／斜体・ベースラインのずらし")
+    py::class_<TextStyle>(m, "TextStyle", "文字スタイル: フォント・サイズ・色・縁取り・影・層・下線・打消し線・字間・向き・平体長体・合成ボールド／斜体・ベースラインのずらし")
         .def(py::init<>())
         .def(py::init([](std::vector<std::string> family, Pt size, Color fill) {
                  TextStyle s; s.font.family = std::move(family); s.size = size; s.fill = fill; return s;
@@ -150,6 +181,12 @@ Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
         .def_readwrite("size", &TextStyle::size)
         .def_readwrite("fill", &TextStyle::fill)
         .def_readwrite("stroke", &TextStyle::stroke)
+        .def_readwrite("shadow", &TextStyle::shadow, "影（TextShadow）。層の一番下に足す")
+        .def_readwrite("layers", &TextStyle::layers,
+                       "外観の層（TextLayer のリスト、下から上）。空なら fill / stroke の 1 層。"
+                       "属性はコピーを返すので、リストを作って代入する")
+        .def_readwrite("underline", &TextStyle::underline, "下線（TextDecoration）。縦組みでは右側の傍線")
+        .def_readwrite("strikethrough", &TextStyle::strikethrough, "打消し線（TextDecoration）")
         .def_readwrite("letter_spacing", &TextStyle::letterSpacing)
         .def_readwrite("orientation", &TextStyle::orientation)
         .def_readwrite("scale_x", &TextStyle::scaleX)

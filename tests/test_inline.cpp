@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <memory>
+#include <variant>
 
 #include "typeset/font/font_set.hpp"
 #include "typeset/inl/item_builder.hpp"
@@ -433,4 +434,222 @@ TEST_CASE("emoji: bitmap (CBDT) color fonts are emitted as images at the text si
     CHECK(box.w < 14.0f * 1.6f);
     CHECK(box.y < 20.0f);
     CHECK(box.bottom() > 20.0f - 14.0f * 0.4f);
+}
+
+namespace {
+
+std::vector<dl::RectItem> rectsOf(const dl::DisplayList& out) {
+    std::vector<dl::RectItem> v;
+    for (const dl::Item& item : out.items) {
+        if (const auto* r = std::get_if<dl::RectItem>(&item)) v.push_back(*r);
+    }
+    return v;
+}
+
+std::vector<dl::GlyphRun> runsOf(const dl::DisplayList& out) {
+    std::vector<dl::GlyphRun> v;
+    for (const dl::Item& item : out.items) {
+        if (const auto* r = std::get_if<dl::GlyphRun>(&item)) v.push_back(*r);
+    }
+    return v;
+}
+
+} // namespace
+
+TEST_CASE("text decoration: underline below the baseline (horizontal) / right of the column (vertical), strikethrough through the middle") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+    inl::ParagraphLayouter layouter(fx.fonts);
+    const Pt size = 10.0f;
+
+    for (bool underline : {true, false}) {
+        TextStyle st = fx.style(size);
+        if (underline) st.underline = TextDecoration{};
+        else st.strikethrough = TextDecoration{};
+        inl::Paragraph para = inl::Paragraph::plain(u"吾輩は猫である。ABC", st);
+        para.style.align = Align::Start;
+        para.style.lineBreak.justify = false;
+        const inl::ConstantLineShape shape(300.0f);
+
+        // 横組み: 行の中心線 y=20。下線はベースライン（中心線＋約 0.38em）より下、em box の下端付近
+        {
+            const inl::ParagraphFragment frag = layouter.layout(para, WritingMode::HorizontalTb, shape);
+            REQUIRE(frag.lines.size() == 1);
+            REQUIRE(frag.styleMetrics.size() == frag.styles.size());
+            dl::DisplayList out;
+            inl::emitParagraph(out, frag, WritingMode::HorizontalTb, Point{0, 20});
+            const auto rects = rectsOf(out);
+            REQUIRE(rects.size() == 1);
+            const Rect r = rects[0].rect;
+            CHECK(r.x == doctest::Approx(0.0f).epsilon(0.01));
+            CHECK(r.w > frag.lines[0].length * 0.9f);
+            CHECK(r.w <= frag.lines[0].length + 1.0f);
+            CHECK(r.h > 0.2f);
+            CHECK(r.h < size * 0.15f);
+            const Pt cy = r.y + r.h * 0.5f;
+            const Pt baseline = 20.0f + frag.styleMetrics[0].baseline;
+            if (underline) {
+                CHECK(cy > baseline);
+                CHECK(cy < 20.0f + size * 0.5f + size * 0.15f);
+            } else {
+                CHECK(cy < baseline);
+                CHECK(cy > 20.0f - size * 0.2f);
+            }
+            // 塗りは文字色
+            CHECK(rects[0].fill == st.fill);
+            // 下線は文字の下（先）に、打消し線は文字の上（後）に出る
+            size_t rectPos = 0, runPos = 0;
+            for (size_t i = 0; i < out.items.size(); ++i) {
+                if (std::holds_alternative<dl::RectItem>(out.items[i])) rectPos = i;
+                if (std::holds_alternative<dl::GlyphRun>(out.items[i])) runPos = i;
+            }
+            if (underline) CHECK(rectPos < runPos); else CHECK(rectPos > runPos);
+        }
+        // 縦組み: 列の中心線 x=100。傍線は右側（x > 100 + 0.5em）、打消し線は中心線上
+        {
+            const inl::ParagraphFragment frag = layouter.layout(para, WritingMode::VerticalRl, shape);
+            REQUIRE(frag.lines.size() == 1);
+            dl::DisplayList out;
+            inl::emitParagraph(out, frag, WritingMode::VerticalRl, Point{100, 0});
+            const auto rects = rectsOf(out);
+            REQUIRE(rects.size() == 1);
+            const Rect r = rects[0].rect;
+            CHECK(r.y == doctest::Approx(0.0f).epsilon(0.01));
+            CHECK(r.h > frag.lines[0].length * 0.9f);
+            CHECK(r.w < size * 0.15f);
+            const Pt cx = r.x + r.w * 0.5f;
+            if (underline) {
+                CHECK(cx > 100.0f + size * 0.5f);
+                CHECK(cx < 100.0f + size * 0.5f + size * 0.2f);
+            } else {
+                CHECK(cx == doctest::Approx(100.0f).epsilon(0.01));
+            }
+        }
+    }
+
+    // 色・太さ・位置の指定
+    {
+        TextStyle st = fx.style(size);
+        TextDecoration d;
+        d.color = Color::rgb(255, 0, 0);
+        d.thickness = 1.5f;
+        d.offset = 0.2f;
+        st.underline = d;
+        inl::Paragraph para = inl::Paragraph::plain(u"猫", st);
+        const inl::ConstantLineShape shape(100.0f);
+        const inl::ParagraphFragment frag = layouter.layout(para, WritingMode::HorizontalTb, shape);
+        dl::DisplayList out;
+        inl::emitParagraph(out, frag, WritingMode::HorizontalTb, Point{0, 20});
+        const auto rects = rectsOf(out);
+        REQUIRE(rects.size() == 1);
+        CHECK(rects[0].fill == Color::rgb(255, 0, 0));
+        CHECK(rects[0].rect.h == doctest::Approx(1.5f));
+        const Pt cy = rects[0].rect.y + rects[0].rect.h * 0.5f;
+        CHECK(cy == doctest::Approx(20.0f + frag.styleMetrics[0].baseline +
+                                    frag.styleMetrics[0].decoration.underlineOffset + size * 0.2f).epsilon(0.01));
+    }
+    // スタイルが変わると線も分かれ、下線の無い run には出ない
+    {
+        TextStyle a = fx.style(size);
+        a.underline = TextDecoration{};
+        TextStyle b = fx.style(size);
+        inl::Paragraph para;
+        para.runs.push_back(inl::InlineRun{u"吾輩は", a});
+        para.runs.push_back(inl::InlineRun{u"猫である。", b});
+        para.runs.push_back(inl::InlineRun{u"名前は", a});
+        const inl::ConstantLineShape shape(300.0f);
+        const inl::ParagraphFragment frag = layouter.layout(para, WritingMode::HorizontalTb, shape);
+        dl::DisplayList out;
+        inl::emitParagraph(out, frag, WritingMode::HorizontalTb, Point{0, 20});
+        const auto rects = rectsOf(out);
+        REQUIRE(rects.size() == 2);
+        CHECK(rects[0].rect.w == doctest::Approx(size * 3.0f).epsilon(0.02));
+        CHECK(rects[1].rect.x > rects[0].rect.right() + size * 4.0f);
+    }
+}
+
+TEST_CASE("text layers: shadow and outline layers are emitted bottom-up, aligned from the top layer") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+    inl::ParagraphLayouter layouter(fx.fonts);
+    const inl::ConstantLineShape shape(300.0f);
+
+    // shadow + stroke: 影の GlyphRun（ずらし・ぼかし）→ 塗り＋縁取りの GlyphRun
+    {
+        TextStyle st = fx.style(10.0f);
+        TextShadow sh;
+        sh.color = Color::rgba(255, 0, 0, 200);
+        sh.offset = Point{1.0f, 2.0f};
+        sh.blur = 1.5f;
+        st.shadow = sh;
+        Stroke stroke;
+        stroke.color = Color::rgb(0, 0, 255);
+        stroke.width = 0.5f;
+        st.stroke = stroke;
+        REQUIRE(st.resolvedLayers().size() == 2);
+
+        inl::Paragraph para = inl::Paragraph::plain(u"吾輩は猫である。", st);
+        const inl::ParagraphFragment frag = layouter.layout(para, WritingMode::HorizontalTb, shape);
+        dl::DisplayList out;
+        inl::emitParagraph(out, frag, WritingMode::HorizontalTb, Point{0, 20});
+        const auto runs = runsOf(out);
+        REQUIRE(runs.size() == 2);
+        CHECK(runs[0].fill == Color::rgba(255, 0, 0, 200));
+        CHECK(!runs[0].stroke);
+        CHECK(runs[0].blur == doctest::Approx(1.5f));
+        CHECK(runs[1].fill == st.fill);
+        REQUIRE(runs[1].stroke);
+        CHECK(*runs[1].stroke == stroke);
+        CHECK(runs[1].blur == 0.0f);
+        REQUIRE(runs[0].glyphs.size() == runs[1].glyphs.size());
+        for (size_t i = 0; i < runs[0].glyphs.size(); ++i) {
+            CHECK(runs[0].glyphs[i].gid == runs[1].glyphs[i].gid);
+            CHECK(runs[0].glyphs[i].pos.x == doctest::Approx(runs[1].glyphs[i].pos.x + 1.0f));
+            CHECK(runs[0].glyphs[i].pos.y == doctest::Approx(runs[1].glyphs[i].pos.y + 2.0f));
+        }
+    }
+    // 明示した層（二重縁取り）は指定順。fill / stroke は使われない
+    {
+        TextStyle st = fx.style(10.0f);
+        st.fill = Color::rgb(1, 2, 3);
+        Stroke outer;
+        outer.color = Color::rgb(0, 0, 0);
+        outer.width = 2.0f;
+        Stroke inner;
+        inner.color = Color::rgb(255, 255, 255);
+        inner.width = 1.0f;
+        st.layers = {TextLayer::outlined(outer), TextLayer::outlined(inner), TextLayer::filled(Color::rgb(200, 0, 0))};
+
+        inl::Paragraph para = inl::Paragraph::plain(u"猫である", st);
+        const inl::ParagraphFragment frag = layouter.layout(para, WritingMode::VerticalRl, shape);
+        dl::DisplayList out;
+        inl::emitParagraph(out, frag, WritingMode::VerticalRl, Point{50, 0});
+        const auto runs = runsOf(out);
+        REQUIRE(runs.size() == 3);
+        CHECK(!runs[0].fill);
+        REQUIRE(runs[0].stroke);
+        CHECK(runs[0].stroke->width == doctest::Approx(2.0f));
+        REQUIRE(runs[1].stroke);
+        CHECK(runs[1].stroke->width == doctest::Approx(1.0f));
+        CHECK(!runs[2].stroke);
+        CHECK(runs[2].fill == Color::rgb(200, 0, 0));
+    }
+    // 層の数が違うスタイルが混ざる行: 影は行全体で先に、塗りは全部あとに出る（同じ外観なので 1 つの run にまとまる）
+    {
+        TextStyle a = fx.style(10.0f);
+        a.shadow = TextShadow{};
+        TextStyle b = fx.style(10.0f);
+        inl::Paragraph para;
+        para.runs.push_back(inl::InlineRun{u"吾輩は", a});
+        para.runs.push_back(inl::InlineRun{u"猫である。", b});
+        const inl::ParagraphFragment frag = layouter.layout(para, WritingMode::HorizontalTb, shape);
+        dl::DisplayList out;
+        inl::emitParagraph(out, frag, WritingMode::HorizontalTb, Point{0, 20});
+        const auto runs = runsOf(out);
+        REQUIRE(runs.size() == 2);
+        CHECK(runs[0].fill == a.shadow->color);
+        CHECK(runs[0].glyphs.size() == 3);
+        CHECK(runs[1].fill == a.fill);
+        CHECK(runs[1].glyphs.size() == 8);
+    }
 }

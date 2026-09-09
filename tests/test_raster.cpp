@@ -4,6 +4,8 @@
 
 #include "backend/path_raster.hpp"
 #include "typeset/backend/raster.hpp"
+#include "typeset/font/font_set.hpp"
+#include "typeset/inl/paragraph.hpp"
 
 using namespace typeset;
 using namespace typeset::backend;
@@ -65,6 +67,67 @@ TEST_CASE("RasterRenderer fills a rect with the expected color") {
     CHECK(bmp.row(3)[3] == 0xFFFF0000u);
     CHECK(bmp.row(0)[0] == 0xFFFFFFFFu);
     CHECK(bmp.row(6)[6] == 0xFFFFFFFFu);
+}
+
+TEST_CASE("RasterRenderer: a blurred glyph run spreads its coverage and keeps the total ink") {
+    font::FontSet fonts;
+    if (!fonts.loadFile("data/NotoSerif-Regular.ttf", "serif")) { MESSAGE("fonts not found; skipping"); return; }
+    TextStyle st;
+    st.font.family = {"serif"};
+    st.size = 40.0f;
+    st.fill = Color::rgb(0, 0, 0);
+    inl::Paragraph para = inl::Paragraph::plain(u"H", st);
+    inl::ParagraphLayouter layouter(fonts);
+    const inl::ConstantLineShape shape(200.0f);
+    const inl::ParagraphFragment frag = layouter.layout(para, WritingMode::HorizontalTb, shape);
+
+    dl::DisplayList sharp;
+    sharp.page = Size{120, 120};
+    inl::emitParagraph(sharp, frag, WritingMode::HorizontalTb, Point{40, 60});
+    dl::DisplayList blurred = sharp;
+    for (dl::Item& item : blurred.items) {
+        if (auto* run = std::get_if<dl::GlyphRun>(&item)) run->blur = 4.0f;
+    }
+
+    RasterRenderer r;
+    RasterOptions o;
+    o.dpi = 72;
+    o.background = Color::rgb(255, 255, 255);
+    const Bitmap a = r.render(sharp, o);
+    const Bitmap b = r.render(blurred, o);
+    REQUIRE(a.width == b.width);
+
+    auto ink = [](const Bitmap& bmp, int& minX, int& maxX) {
+        double sum = 0.0;
+        minX = bmp.width; maxX = -1;
+        for (int y = 0; y < bmp.height; ++y) {
+            for (int x = 0; x < bmp.width; ++x) {
+                const int v = 255 - static_cast<int>(bmp.row(y)[x] & 0xFF);
+                if (v > 0) { minX = std::min(minX, x); maxX = std::max(maxX, x); }
+                sum += v;
+            }
+        }
+        return sum;
+    };
+    int aMin, aMax, bMin, bMax;
+    const double ia = ink(a, aMin, aMax);
+    const double ib = ink(b, bMin, bMax);
+    REQUIRE(ia > 0.0);
+    // ぼかしで広がる（半径 4pt ≒ 4px、σ=2 なので数 px 外へ）が、総量はほぼ変わらない
+    CHECK(bMin < aMin - 2);
+    CHECK(bMax > aMax + 2);
+    CHECK(ib > ia * 0.9);
+    CHECK(ib < ia * 1.1);
+    // 文字の内部（一番濃い画素）はぼかしで薄くなる
+    int aDark = 255, bDark = 255;
+    for (int y = 0; y < a.height; ++y) {
+        for (int x = 0; x < a.width; ++x) {
+            aDark = std::min(aDark, static_cast<int>(a.row(y)[x] & 0xFF));
+            bDark = std::min(bDark, static_cast<int>(b.row(y)[x] & 0xFF));
+        }
+    }
+    CHECK(aDark == 0);
+    CHECK(bDark > 0);
 }
 
 #include <fstream>

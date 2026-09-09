@@ -141,9 +141,18 @@ struct LineBox {
     Pt extraAfter = 0.0f;
 };
 
+/**
+ * スタイルごとの、描くときに要るメトリクス（ParagraphFragment::styleMetrics。styles と同じ添字）
+ */
+struct StyleMetrics {
+    Pt baseline = 0.0f;                 ///< 中心線からベースラインへ（横組み。block 軸で下が正）
+    font::DecorationMetrics decoration; ///< 下線・打消し線の位置と太さ
+};
+
 struct ParagraphFragment {
     std::vector<LineBox> lines;
     std::vector<TextStyle> styles;      ///< PlacedGlyph::styleIndex → スタイル
+    std::vector<StyleMetrics> styleMetrics;   ///< styles と同じ添字（第一候補フォントから）
     size_t charStart = 0;               ///< 組んだ範囲（UTF-16）
     size_t charEnd = 0;
     bool complete = false;              ///< 本文を最後まで組めた

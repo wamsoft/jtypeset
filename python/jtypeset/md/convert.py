@@ -762,7 +762,8 @@ class Converter:
     def _inline(self, children: Sequence[Token], base: ts.TextStyle, pstyle: ts.ParagraphStyle) -> ts.Paragraph:
         p = ts.Paragraph()
         p.style = pstyle
-        state = {"pos": 0, "bold": 0, "italic": 0, "code": 0, "href": None, "link_text": ""}
+        state = {"pos": 0, "bold": 0, "italic": 0, "code": 0, "underline": 0, "strike": 0,
+                 "href": None, "link_text": ""}
 
         def cur_style() -> ts.TextStyle:
             st = self.mono.copy() if state["code"] else base.copy()
@@ -771,6 +772,10 @@ class Converter:
                 st.fake_bold = True
             if state["italic"]:
                 st.fake_italic = True
+            if state["underline"]:
+                st.underline = ts.TextDecoration()
+            if state["strike"]:
+                st.strikethrough = ts.TextDecoration()
             return st
 
         def add_text(text: str) -> None:
@@ -850,11 +855,21 @@ class Converter:
                 p.add_object("tex", c.content.strip(), cur_style())
                 state["pos"] += 1
             elif t == "html_inline":
-                low = c.content.lower()
+                low = c.content.lower().replace(" ", "")
                 if low.startswith("<br"):
                     emit("\n")
-            elif t in ("s_open", "s_close"):
-                pass
+                elif low in ("<u>", "<ins>"):
+                    state["underline"] += 1
+                elif low in ("</u>", "</ins>"):
+                    state["underline"] = max(0, state["underline"] - 1)
+                elif low in ("<s>", "<del>", "<strike>"):
+                    state["strike"] += 1
+                elif low in ("</s>", "</del>", "</strike>"):
+                    state["strike"] = max(0, state["strike"] - 1)
+            elif t == "s_open":
+                state["strike"] += 1
+            elif t == "s_close":
+                state["strike"] = max(0, state["strike"] - 1)
             elif c.children:
                 # 未対応の入れ子はテキストだけ拾う
                 for cc in c.children:

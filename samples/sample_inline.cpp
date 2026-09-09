@@ -7,6 +7,7 @@
  * ※ リポジトリルートから実行すること（フォントを ./data/ から読む）
  */
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -97,8 +98,48 @@ int main() {
         u"　あとは、（括弧の）詰めと、中点・読点、の並びを見る。\n"
         u"二つ目の段落。空行の後にも一字下げが付く。絵文字 \U0001F600\U0001F44D\U0001F3FD\U0001F1EF\U0001F1F5 もカラーで組める。";
 
+    // 装飾: 影（ぼかし）・下線（縦組みでは右側の傍線）・打消し線・二重縁取り。範囲ごとにスタイルの違う run にする
+    TextStyle shadowed = body;
+    shadowed.shadow = TextShadow{Color::rgba(0, 0, 0, 110), Point{0.7f, 0.7f}, 1.2f};
+    TextStyle underlined = body;
+    underlined.underline = TextDecoration{};
+    TextStyle struck = body;
+    struck.strikethrough = TextDecoration{Color::rgb(200, 0, 0), 0.0f, 0.0f};
+    TextStyle doubleOutline = body;
+    {
+        Stroke outer;
+        outer.color = Color::rgb(30, 60, 160);
+        outer.width = 1.6f;
+        outer.join = StrokeJoin::Round;
+        Stroke inner;
+        inner.color = Color::rgb(255, 255, 255);
+        inner.width = 0.8f;
+        inner.join = StrokeJoin::Round;
+        doubleOutline.layers = {TextLayer::outlined(outer), TextLayer::outlined(inner),
+                                TextLayer::filled(Color::rgb(30, 60, 160))};
+    }
+    struct Span { size_t start, end; const TextStyle* style; };
+    std::vector<Span> spans;
+    auto span = [&](const char16_t* s, const TextStyle& st) {
+        const size_t p = findU(text, s);
+        spans.push_back(Span{p, p + std::char_traits<char16_t>::length(s), &st});
+    };
+    span(u"吾輩は猫である。", shadowed);
+    span(u"薄暗い", struck);
+    span(u"泣いていた事", underlined);
+    span(u"一文である", doubleOutline);
+    std::sort(spans.begin(), spans.end(), [](const Span& a, const Span& b) { return a.start < b.start; });
+
     inl::Paragraph para;
-    para.runs.push_back(inl::InlineRun{text, body});
+    {
+        size_t pos = 0;
+        for (const Span& sp : spans) {
+            if (sp.start > pos) para.runs.push_back(inl::InlineRun{text.substr(pos, sp.start - pos), body});
+            para.runs.push_back(inl::InlineRun{text.substr(sp.start, sp.end - sp.start), *sp.style});
+            pos = sp.end;
+        }
+        if (pos < text.size()) para.runs.push_back(inl::InlineRun{text.substr(pos), body});
+    }
     para.style.firstLineIndent = 1.0f;
     para.style.lineHeight = 1.9f;
     para.style.spacing.hangingPunctuation = true;
@@ -168,7 +209,8 @@ int main() {
         inl::Paragraph kp = para;
         kp.style.lineBreak.strategy = LineBreakStrategy::KnuthPlass;
         kp.annotations.clear();
-        kp.runs[0].text = text.substr(0, text.find(u'\n'));
+        kp.runs.clear();
+        kp.runs.push_back(inl::InlineRun{text.substr(0, text.find(u'\n')), body});
         kp.runs[0].style.size = 8.0f;
         const inl::ConstantLineShape shape(120.0f);
         inl::ParagraphFragment frag = layouter.layout(kp, WritingMode::HorizontalTb, shape);

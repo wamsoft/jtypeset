@@ -32,6 +32,11 @@ struct PlacedGlyph {
     Pt inline_ = 0.0f;      ///< ペン位置（送り方向）
     Pt block = 0.0f;        ///< ペン位置（中心線からのずれ）
     Pt advance = 0.0f;      ///< 送り
+    /// グリフの箱（送り方向）: 始端は inline_ - boxBefore、終端は inline_ + boxAfter。
+    /// 正立の縦組みではペン（水平原点）が箱の始端からアセント分進んだ所にあるので inline_ とは一致しない。
+    /// 位置のシフト（+=）に対して不変。下線などの範囲に使う
+    Pt boxBefore = 0.0f;
+    Pt boxAfter = 0.0f;
     Mat2 xform;             ///< 物理空間でのグリフ固有の変形（回転・平体長体・斜体）
     Pt size = 0.0f;         ///< フォントサイズ
     uint32_t charIndex = 0; ///< 元テキストでの位置（UTF-16）

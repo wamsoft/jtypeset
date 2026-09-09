@@ -132,4 +132,30 @@ void faceAscentDescent(const glyphware::Face& face, Pt size, Pt& ascent, Pt& des
     }
 }
 
+DecorationMetrics decorationMetrics(FontSet& fonts, const glyphware::Face& face, Pt size) {
+    DecorationMetrics m;
+    m.underlineOffset = size * 0.1f;
+    m.underlineThickness = size * 0.05f;
+    m.strikeoutOffset = -size * 0.3f;
+    m.strikeoutThickness = size * 0.05f;
+    hb_font_t* font = fonts.hbFont(face);
+    if (!font) return m;
+    const float upem = unitsPerEm(face);
+    // hb_ot_metrics は y-up（下線の位置は負）。block 軸（下が正）に合わせて符号を反転する
+    hb_position_t v = 0;
+    if (hb_ot_metrics_get_position(font, HB_OT_METRICS_TAG_UNDERLINE_OFFSET, &v) && v != 0) {
+        m.underlineOffset = -static_cast<float>(v) / upem * size;
+    }
+    if (hb_ot_metrics_get_position(font, HB_OT_METRICS_TAG_UNDERLINE_SIZE, &v) && v > 0) {
+        m.underlineThickness = static_cast<float>(v) / upem * size;
+    }
+    if (hb_ot_metrics_get_position(font, HB_OT_METRICS_TAG_STRIKEOUT_OFFSET, &v) && v != 0) {
+        m.strikeoutOffset = -static_cast<float>(v) / upem * size;
+    }
+    if (hb_ot_metrics_get_position(font, HB_OT_METRICS_TAG_STRIKEOUT_SIZE, &v) && v > 0) {
+        m.strikeoutThickness = static_cast<float>(v) / upem * size;
+    }
+    return m;
+}
+
 } // namespace typeset::font

@@ -133,6 +133,12 @@ struct Stroke {
     StrokeJoin join = StrokeJoin::Miter;
     StrokeCap cap = StrokeCap::Butt;
     float miterLimit = 4.0f;
+
+    bool operator==(const Stroke& o) const {
+        return color == o.color && width == o.width && join == o.join && cap == o.cap &&
+               miterLimit == o.miterLimit;
+    }
+    bool operator!=(const Stroke& o) const { return !(*this == o); }
 };
 
 /**

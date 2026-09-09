@@ -182,6 +182,20 @@ ParagraphFragment ParagraphLayouter::layoutOnce(const Paragraph& para, WritingMo
         objects.push_back(r.object);
     }
     if (frag.styles.empty()) frag.styles.push_back(TextStyle{});
+    for (const TextStyle& st : frag.styles) {
+        StyleMetrics sm;
+        if (std::shared_ptr<glyphware::Face> primary = fonts_.primary(st.font)) {
+            sm.baseline = baselineOffset(*primary, st.size, WritingMode::HorizontalTb);
+            sm.decoration = font::decorationMetrics(fonts_, *primary, st.size);
+        } else {
+            sm.baseline = st.size * 0.38f;
+            sm.decoration.underlineOffset = st.size * 0.1f;
+            sm.decoration.underlineThickness = st.size * 0.05f;
+            sm.decoration.strikeoutOffset = -st.size * 0.3f;
+            sm.decoration.strikeoutThickness = st.size * 0.05f;
+        }
+        frag.styleMetrics.push_back(sm);
+    }
 
     const TextStyle& base = para.baseStyle();
     const Pt baseSize = base.size;
@@ -372,77 +386,159 @@ Point lineOriginAt(WritingMode wm, Point origin, Pt adv, Pt indent) {
     return origin;
 }
 
+namespace {
+
+/// 行内の下線／打消し線を矩形で出す。同じスタイルの連続したグリフをひとつの線にする
+void emitDecorations(dl::DisplayList& out, const ParagraphFragment& frag, const LineBox& line,
+                     WritingMode wm, Point lo, bool underline) {
+    const bool vertical = isVertical(wm);
+    size_t i = 0;
+    while (i < line.glyphs.size()) {
+        const PlacedGlyph& g0 = line.glyphs[i];
+        if (g0.object || g0.image) { ++i; continue; }
+        const size_t si = g0.styleIndex < frag.styles.size() ? g0.styleIndex : 0;
+        const TextStyle& style = frag.styles[si];
+        const std::optional<TextDecoration>& deco = underline ? style.underline : style.strikethrough;
+        if (!deco) { ++i; continue; }
+        size_t j = i + 1;
+        while (j < line.glyphs.size() && !line.glyphs[j].object && !line.glyphs[j].image &&
+               line.glyphs[j].styleIndex == g0.styleIndex) ++j;
+        const PlacedGlyph& g1 = line.glyphs[j - 1];
+
+        const StyleMetrics sm = si < frag.styleMetrics.size() ? frag.styleMetrics[si] : StyleMetrics{};
+        const font::DecorationMetrics& dm = sm.decoration;
+        Pt thickness = deco->thickness > 0.0f ? deco->thickness
+                                              : (underline ? dm.underlineThickness : dm.strikeoutThickness);
+        if (thickness <= 0.0f) thickness = style.size * 0.05f;
+        const Pt shift = style.baselineShift * style.size;
+        Pt center;
+        if (vertical) {
+            // 傍線は列の右側（文字の外）。打消し線は列の中心線
+            center = shift + (underline ? style.size * 0.5f + dm.underlineOffset : 0.0f) +
+                     deco->offset * style.size;
+        } else {
+            center = sm.baseline - shift + (underline ? dm.underlineOffset : dm.strikeoutOffset) +
+                     deco->offset * style.size;
+        }
+        const Pt from = g0.inline_ - g0.boxBefore;
+        const Pt to = g1.inline_ + g1.boxAfter;
+        const Point p0 = toPhysical(wm, LogicalPoint{from, center - thickness * 0.5f}, lo);
+        const Point p1 = toPhysical(wm, LogicalPoint{to, center + thickness * 0.5f}, lo);
+        dl::RectItem rect;
+        rect.rect = Rect{std::min(p0.x, p1.x), std::min(p0.y, p1.y),
+                         std::fabs(p1.x - p0.x), std::fabs(p1.y - p0.y)};
+        rect.fill = deco->color ? *deco->color : style.fill;
+        out.add(rect);
+        i = j;
+    }
+}
+
+} // namespace
+
 void emitParagraph(dl::DisplayList& out, const ParagraphFragment& frag, WritingMode wm,
                    Point origin, int lineOffset) {
+    // スタイルごとの層（下から上）
+    std::vector<std::vector<TextLayer>> layers;
+    layers.reserve(frag.styles.size());
+    size_t maxLayers = 1;
+    for (const TextStyle& st : frag.styles) {
+        layers.push_back(st.resolvedLayers());
+        maxLayers = std::max(maxLayers, layers.back().size());
+    }
+    auto layersOf = [&](const PlacedGlyph& g) -> const std::vector<TextLayer>& {
+        return layers[g.styleIndex < layers.size() ? g.styleIndex : 0];
+    };
+
     for (size_t li = 0; li < frag.lines.size(); ++li) {
         const LineBox& line = frag.lines[li];
         const Point lo = lineOriginAt(wm, origin,
                                       frag.linePitch * static_cast<float>(lineOffset) + frag.lineCenterOffset(li),
                                       line.indent);
 
-        dl::GlyphRun run;
-        bool open = false;
-        auto flush = [&]() {
-            if (open && !run.glyphs.empty()) out.add(run);
-            run = dl::GlyphRun{};
-            open = false;
-        };
+        emitDecorations(out, frag, line, wm, lo, true);
 
-        for (const PlacedGlyph& g : line.glyphs) {
-            if (g.object) {
-                // 行内オブジェクト: 論理の箱 [inline_, inline_+w] × [block, block+h] に置く。縦組みは横倒し
-                flush();
-                const Size sz = g.object->size;
-                const Point p0 = toPhysical(wm, LogicalPoint{g.inline_, g.block}, lo);
-                const Point p1 = toPhysical(wm, LogicalPoint{g.inline_ + sz.w, g.block + sz.h}, lo);
-                const Rect box{std::min(p0.x, p1.x), std::min(p0.y, p1.y),
-                               std::fabs(p1.x - p0.x), std::fabs(p1.y - p0.y)};
-                out.add(objectGroup(*g.object, box, isVertical(wm)));
-                continue;
+        // 層は上から数えて揃える（k = 0 が最上層）。影や外側の縁取りが隣の文字の塗りに載らないよう、
+        // 下の層を行全体で先に出す。画像・オブジェクト・カラーグリフは最上層のときに 1 回だけ出す
+        for (size_t k = maxLayers; k-- > 0;) {
+            dl::GlyphRun run;
+            bool open = false;
+            const TextLayer* runLayer = nullptr;
+            auto flush = [&]() {
+                if (open && !run.glyphs.empty()) out.add(run);
+                run = dl::GlyphRun{};
+                open = false;
+                runLayer = nullptr;
+            };
+
+            for (const PlacedGlyph& g : line.glyphs) {
+                if (g.object) {
+                    if (k != 0) continue;
+                    // 行内オブジェクト: 論理の箱 [inline_, inline_+w] × [block, block+h] に置く。縦組みは横倒し
+                    flush();
+                    const Size sz = g.object->size;
+                    const Point p0 = toPhysical(wm, LogicalPoint{g.inline_, g.block}, lo);
+                    const Point p1 = toPhysical(wm, LogicalPoint{g.inline_ + sz.w, g.block + sz.h}, lo);
+                    const Rect box{std::min(p0.x, p1.x), std::min(p0.y, p1.y),
+                                   std::fabs(p1.x - p0.x), std::fabs(p1.y - p0.y)};
+                    out.add(objectGroup(*g.object, box, isVertical(wm)));
+                    continue;
+                }
+                if (g.image) {
+                    if (k != 0) continue;
+                    // 行内画像: 中心を (inline_ + adv/2, block) に置く
+                    flush();
+                    const bool vertical = isVertical(wm);
+                    const Pt adv = vertical ? g.imageSize.h : g.imageSize.w;
+                    const Point c = toPhysical(wm, LogicalPoint{g.inline_ + adv * 0.5f, g.block}, lo);
+                    dl::ImageItem item;
+                    item.image = g.image;
+                    item.xform = multiply(Matrix::translation(c.x - g.imageSize.w * 0.5f, c.y - g.imageSize.h * 0.5f),
+                                          Matrix::scaling(g.imageSize.w / static_cast<float>(std::max(1, g.image->width)),
+                                                          g.imageSize.h / static_cast<float>(std::max(1, g.image->height))));
+                    out.add(item);
+                    continue;
+                }
+                // カラーグリフ（絵文字）はレイヤ／ビットマップとして置く（3 backend で同じ色になる）
+                if (g.face && g.face->descriptor().color) {
+                    if (k != 0) continue;
+                    const Point pp = toPhysical(wm, LogicalPoint{g.inline_, g.block}, lo);
+                    flush();
+                    if (emitColorGlyph(out, *g.face, g.gid, g.size, pp, g.xform)) continue;
+                }
+                const std::vector<TextLayer>& ls = layersOf(g);
+                if (k >= ls.size()) continue;
+                const TextLayer& layer = ls[ls.size() - 1 - k];
+                if (!layer.fill && !layer.stroke) continue;
+                const bool same = open && run.face == g.face && run.size == g.size &&
+                                  run.embolden == g.embolden && runLayer &&
+                                  runLayer->fill == layer.fill && runLayer->stroke == layer.stroke &&
+                                  runLayer->offset.x == layer.offset.x && runLayer->offset.y == layer.offset.y &&
+                                  runLayer->blur == layer.blur;
+                if (!same) {
+                    flush();
+                    run.face = g.face;
+                    run.size = g.size;
+                    run.fill = layer.fill;
+                    run.stroke = layer.stroke;
+                    run.blur = layer.blur;
+                    run.embolden = g.embolden;
+                    run.text = frag.text;
+                    runLayer = &layer;
+                    open = true;
+                }
+                dl::Glyph dg;
+                dg.gid = g.gid;
+                dg.pos = toPhysical(wm, LogicalPoint{g.inline_, g.block}, lo);
+                dg.pos.x += layer.offset.x;
+                dg.pos.y += layer.offset.y;
+                dg.xform = g.xform;
+                dg.charIndex = g.charIndex;
+                run.glyphs.push_back(dg);
             }
-            if (g.image) {
-                // 行内画像: 中心を (inline_ + adv/2, block) に置く
-                flush();
-                const bool vertical = isVertical(wm);
-                const Pt adv = vertical ? g.imageSize.h : g.imageSize.w;
-                const Point c = toPhysical(wm, LogicalPoint{g.inline_ + adv * 0.5f, g.block}, lo);
-                dl::ImageItem item;
-                item.image = g.image;
-                item.xform = multiply(Matrix::translation(c.x - g.imageSize.w * 0.5f, c.y - g.imageSize.h * 0.5f),
-                                      Matrix::scaling(g.imageSize.w / static_cast<float>(std::max(1, g.image->width)),
-                                                      g.imageSize.h / static_cast<float>(std::max(1, g.image->height))));
-                out.add(item);
-                continue;
-            }
-            // カラーグリフ（絵文字）はレイヤ／ビットマップとして置く（3 backend で同じ色になる）
-            if (g.face && g.face->descriptor().color) {
-                const Point pp = toPhysical(wm, LogicalPoint{g.inline_, g.block}, lo);
-                flush();
-                if (emitColorGlyph(out, *g.face, g.gid, g.size, pp, g.xform)) continue;
-            }
-            const TextStyle& style = (g.styleIndex < frag.styles.size())
-                                         ? frag.styles[g.styleIndex] : frag.styles.front();
-            const bool same = open && run.face == g.face && run.size == g.size &&
-                              run.embolden == g.embolden && run.fill == style.fill &&
-                              run.stroke.has_value() == style.stroke.has_value();
-            if (!same) {
-                flush();
-                run.face = g.face;
-                run.size = g.size;
-                run.fill = style.fill;
-                run.stroke = style.stroke;
-                run.embolden = g.embolden;
-                run.text = frag.text;
-                open = true;
-            }
-            dl::Glyph dg;
-            dg.gid = g.gid;
-            dg.pos = toPhysical(wm, LogicalPoint{g.inline_, g.block}, lo);
-            dg.xform = g.xform;
-            dg.charIndex = g.charIndex;
-            run.glyphs.push_back(dg);
+            flush();
         }
-        flush();
+
+        emitDecorations(out, frag, line, wm, lo, false);
     }
 }
 

@@ -51,6 +51,8 @@ struct GlyphRun {
     std::optional<Color> fill;      ///< 塗り（無ければ塗らない）
     std::optional<Stroke> stroke;   ///< 縁取り
     Pt embolden = 0.0f;             ///< フェイクボールドの太らせ幅（0 = 無し）
+    /// ぼかし半径（pt）。影の層に使う。ラスタと SVG はガウスぼかし、PDF はぼかさずに描く
+    Pt blur = 0.0f;
 
     /// charIndex が指す原文（PDF の ToUnicode、SVG の代替テキストに使う）
     std::shared_ptr<const std::u16string> text;

@@ -26,6 +26,47 @@ struct FontSpec {
 };
 
 /**
+ * 文字の外観の 1 層（塗り・縁取り・影）
+ *
+ * TextStyle::layers に下から上の順で並べる。1 層は同じグリフを offset だけずらし、blur でぼかして
+ * fill（塗り）と stroke（縁取り）で描く。塗りだけ／縁取りだけの層も作れる（二重縁取り = 太い縁取りの層＋細い縁取りの層＋塗りの層）
+ */
+struct TextLayer {
+    std::optional<Color> fill;
+    std::optional<Stroke> stroke;
+    /// ずらし（pt、物理座標。右・下が正。縦組みでも同じ向き）
+    Point offset;
+    /// ぼかし半径（pt）。ラスタと SVG はガウスぼかし、PDF はぼかさずに置く
+    Pt blur = 0.0f;
+
+    static TextLayer filled(Color c) { TextLayer l; l.fill = c; return l; }
+    static TextLayer outlined(Stroke s) { TextLayer l; l.stroke = s; return l; }
+};
+
+/**
+ * 影（TextStyle::shadow）。層の一番下に「塗り = color、offset、blur」の 1 層として置く糖衣
+ */
+struct TextShadow {
+    Color color{0, 0, 0, 128};
+    Point offset{1.0f, 1.0f};
+    Pt blur = 0.0f;
+};
+
+/**
+ * 下線・打消し線（TextStyle::underline / strikethrough）
+ *
+ * 横組みの下線はベースラインの下（フォントの post テーブルの位置）、縦組みでは文字の右側（傍線）。
+ * 打消し線は横組みで x ハイトの中ほど（OS/2 の yStrikeoutPosition）、縦組みで列の中心線。
+ * 太さ・位置はフォントのメトリクスから取り、無ければ size の 1/20・1/10 を使う
+ */
+struct TextDecoration {
+    std::optional<Color> color;     ///< 無ければ TextStyle::fill
+    Pt thickness = 0.0f;            ///< 0 でフォントのメトリクス
+    /// 位置の補正（em）。文字から離れる向きが正（横組み: 下、縦組み: 右）
+    float offset = 0.0f;
+};
+
+/**
  * 文字スタイル
  */
 struct TextStyle {
@@ -33,6 +74,15 @@ struct TextStyle {
     Pt size = 10.0f;
     Color fill{0, 0, 0, 255};
     std::optional<Stroke> stroke;           ///< 縁取り
+
+    /// 影。layers の下に 1 層足す
+    std::optional<TextShadow> shadow;
+    /// 外観の層（下から上）。空なら fill / stroke の 1 層。指定すると fill / stroke は描画に使わない
+    /// （下線の既定色としては fill が使われる）
+    std::vector<TextLayer> layers;
+
+    std::optional<TextDecoration> underline;
+    std::optional<TextDecoration> strikethrough;
 
     /// 字間（em 単位）。組版層ではクラスタ間の Glue として扱う
     float letterSpacing = 0.0f;
@@ -53,6 +103,27 @@ struct TextStyle {
 
     /// BCP47（シェイピングの言語タグ。"ja" で日本語字形が選ばれる）
     std::string language = "ja";
+
+    /// 実際に描く層（下から上）: shadow → layers（空なら fill / stroke の 1 層）
+    std::vector<TextLayer> resolvedLayers() const {
+        std::vector<TextLayer> out;
+        if (shadow) {
+            TextLayer l;
+            l.fill = shadow->color;
+            l.offset = shadow->offset;
+            l.blur = shadow->blur;
+            out.push_back(l);
+        }
+        if (layers.empty()) {
+            TextLayer l;
+            l.fill = fill;
+            l.stroke = stroke;
+            out.push_back(l);
+        } else {
+            out.insert(out.end(), layers.begin(), layers.end());
+        }
+        return out;
+    }
 };
 
 /**

@@ -8,8 +8,10 @@
 #include "typeset/backend/raster.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <fstream>
 #include <unordered_map>
 
@@ -254,6 +256,8 @@ struct RasterRenderer::Impl {
                    float opacity, bool useCache);
     void drawGlyphRun(Target& t, const dl::GlyphRun& run, const Matrix& ctm, float opacity,
                       bool useCache);
+    /// ぼかし付きの GlyphRun（影）。行全体のカバレッジを 1 枚に集めてぼかし、1 回で合成する
+    void drawBlurredGlyphRun(Target& t, const dl::GlyphRun& run, const Matrix& ctm, float opacity);
     void drawPath(Target& t, const dl::PathItem& item, const Matrix& ctm, float opacity);
     void drawRect(Target& t, const dl::RectItem& item, const Matrix& ctm, float opacity);
     void drawImage(Target& t, const dl::ImageItem& item, const Matrix& ctm, float opacity);
@@ -342,9 +346,137 @@ void RasterRenderer::Impl::blendGlyph(Target& t, glyphware::Face& face, uint32_t
     blendMask(t, cm.coverage.data(), cm.width, cm.rows, cm.width, ox, oy, color, alpha);
 }
 
+namespace {
+
+/// ガウスぼかしを 3 回のボックスぼかしで近似するときの各箱の半径
+std::array<int, 3> boxRadiiForGauss(float sigma) {
+    const int n = 3;
+    const float wIdeal = std::sqrt(12.0f * sigma * sigma / n + 1.0f);
+    int wl = static_cast<int>(std::floor(wIdeal));
+    if (wl % 2 == 0) --wl;
+    const int wu = wl + 2;
+    const float mIdeal = (12.0f * sigma * sigma - n * wl * wl - 4.0f * n * wl - 3.0f * n) / (-4.0f * wl - 4.0f);
+    const int m = static_cast<int>(std::lround(mIdeal));
+    std::array<int, 3> r{};
+    for (int i = 0; i < n; ++i) r[static_cast<size_t>(i)] = std::max(0, ((i < m ? wl : wu) - 1) / 2);
+    return r;
+}
+
+/// 1 軸のボックスぼかし（範囲外は 0）。src → dst、長さ n、要素間隔 stride
+void boxBlurLine(const uint8_t* src, uint8_t* dst, int n, int stride, int r) {
+    if (r <= 0) {
+        for (int i = 0; i < n; ++i) dst[i * stride] = src[i * stride];
+        return;
+    }
+    const int win = 2 * r + 1;
+    int sum = 0;
+    for (int i = 0; i < std::min(n, r); ++i) sum += src[i * stride];
+    for (int i = 0; i < n; ++i) {
+        const int add = i + r;
+        const int sub = i - r - 1;
+        if (add < n) sum += src[add * stride];
+        if (sub >= 0) sum -= src[sub * stride];
+        dst[i * stride] = static_cast<uint8_t>((sum + win / 2) / win);
+    }
+}
+
+void gaussianBlur(std::vector<uint8_t>& a, int w, int h, float sigma) {
+    if (sigma <= 0.0f || w <= 0 || h <= 0) return;
+    std::vector<uint8_t> tmp(a.size());
+    for (int r : boxRadiiForGauss(sigma)) {
+        for (int y = 0; y < h; ++y) boxBlurLine(a.data() + static_cast<size_t>(y) * w, tmp.data() + static_cast<size_t>(y) * w, w, 1, r);
+        for (int x = 0; x < w; ++x) boxBlurLine(tmp.data() + x, a.data() + x, h, w, r);
+    }
+}
+
+} // namespace
+
+void RasterRenderer::Impl::drawBlurredGlyphRun(Target& t, const dl::GlyphRun& run, const Matrix& ctm,
+                                               float opacity) {
+    glyphware::Face& face = *run.face;
+    const float upem = font::unitsPerEm(face);
+    const float s = run.size / upem;
+    Matrix base;
+    base.xx = s; base.yy = -s;
+    const float devScale = std::sqrt(std::fabs(ctm.determinant()));
+    const float sigma = run.blur * devScale * 0.5f;
+    const int margin = static_cast<int>(std::ceil(sigma * 3.0f)) + 1;
+
+    struct Mask { int left, top, w, h; std::vector<uint8_t> a; };
+    std::vector<Mask> masks;
+    int x0 = std::numeric_limits<int>::max(), y0 = x0, x1 = std::numeric_limits<int>::min(), y1 = x1;
+    auto addMask = [&](uint32_t gid, const Matrix& m, float strokeWidth, StrokeJoin join, StrokeCap cap) {
+        glyphware::RenderParams params;
+        params.transform.xx = m.xx;
+        params.transform.xy = m.xy;
+        params.transform.dx = m.dx;
+        params.transform.yx = -m.yx;
+        params.transform.yy = -m.yy;
+        params.transform.dy = -m.dy;
+        params.strokeWidth = strokeWidth;
+        params.join = toGw(join);
+        params.cap = toGw(cap);
+        glyphware::GlyphMask gm;
+        if (!face.renderGlyphMask(gid, params, gm) || gm.width <= 0 || gm.rows <= 0) return;
+        Mask mk{gm.left, -gm.top, gm.width, gm.rows, {}};
+        mk.a.resize(static_cast<size_t>(gm.width) * gm.rows);
+        for (int r = 0; r < gm.rows; ++r) {
+            std::memcpy(mk.a.data() + static_cast<size_t>(r) * gm.width,
+                        gm.buffer + static_cast<ptrdiff_t>(gm.pitch) * r, static_cast<size_t>(gm.width));
+        }
+        x0 = std::min(x0, mk.left);
+        y0 = std::min(y0, mk.top);
+        x1 = std::max(x1, mk.left + mk.w);
+        y1 = std::max(y1, mk.top + mk.h);
+        masks.push_back(std::move(mk));
+    };
+
+    // 塗りと縁取りを同じカバレッジへ集める（色は塗り優先。影は普通どちらか一方）
+    const Color color = run.fill ? *run.fill : run.stroke->color;
+    for (const dl::Glyph& g : run.glyphs) {
+        Matrix m = multiply(Matrix::fromMat2(g.xform), base);
+        m = multiply(Matrix::translation(g.pos.x, g.pos.y), m);
+        m = multiply(ctm, m);
+        if (run.fill) {
+            addMask(g.gid, m, run.embolden > 0.0f ? run.embolden * devScale : 0.0f, StrokeJoin::Round, StrokeCap::Round);
+        }
+        if (run.stroke && run.stroke->width > 0.0f) {
+            addMask(g.gid, m, (run.stroke->width + run.embolden) * devScale, run.stroke->join, run.stroke->cap);
+        }
+    }
+    if (masks.empty()) return;
+
+    // クリップの外はぼかしの届く範囲だけ残す
+    x0 = std::max(x0 - margin, t.cx0 - margin);
+    y0 = std::max(y0 - margin, t.cy0 - margin);
+    x1 = std::min(x1 + margin, t.cx1 + margin);
+    y1 = std::min(y1 + margin, t.cy1 + margin);
+    const int w = x1 - x0, h = y1 - y0;
+    if (w <= 0 || h <= 0) return;
+    std::vector<uint8_t> cov(static_cast<size_t>(w) * h, 0);
+    for (const Mask& mk : masks) {
+        for (int r = 0; r < mk.h; ++r) {
+            const int y = mk.top + r - y0;
+            if (y < 0 || y >= h) continue;
+            for (int c = 0; c < mk.w; ++c) {
+                const int x = mk.left + c - x0;
+                if (x < 0 || x >= w) continue;
+                uint8_t& d = cov[static_cast<size_t>(y) * w + x];
+                d = std::max(d, mk.a[static_cast<size_t>(r) * mk.w + c]);
+            }
+        }
+    }
+    gaussianBlur(cov, w, h, sigma);
+    blendMask(t, cov.data(), w, h, w, x0, y0, color, effectiveAlpha(color, opacity));
+}
+
 void RasterRenderer::Impl::drawGlyphRun(Target& t, const dl::GlyphRun& run, const Matrix& ctm,
                                         float opacity, bool useCache) {
     if (!run.face || run.glyphs.empty()) return;
+    if (run.blur > 0.0f && (run.fill || run.stroke)) {
+        drawBlurredGlyphRun(t, run, ctm, opacity);
+        return;
+    }
     glyphware::Face& face = *run.face;
     const float upem = font::unitsPerEm(face);
     const float s = run.size / upem;

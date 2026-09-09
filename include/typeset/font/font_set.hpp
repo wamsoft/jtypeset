@@ -78,6 +78,20 @@ float unitsPerEm(const glyphware::Face& face);
 /// face の ascender / descender（正・正、pt）を size で返す
 void faceAscentDescent(const glyphware::Face& face, Pt size, Pt& ascent, Pt& descent);
 
+/**
+ * 下線・打消し線のメトリクス（pt、size で換算）。位置はベースラインからの距離で下が正
+ * （横組みの block 軸と同じ向き。打消し線は通常負）
+ */
+struct DecorationMetrics {
+    Pt underlineOffset = 0.0f;
+    Pt underlineThickness = 0.0f;
+    Pt strikeoutOffset = 0.0f;
+    Pt strikeoutThickness = 0.0f;
+};
+
+/// post / OS/2 から取る（hb_ot_metrics）。無ければ下線 0.1em / 太さ 0.05em、打消し線 -0.3em
+DecorationMetrics decorationMetrics(FontSet& fonts, const glyphware::Face& face, Pt size);
+
 } // namespace typeset::font
 
 #endif // TYPESET_FONT_FONT_SET_HPP

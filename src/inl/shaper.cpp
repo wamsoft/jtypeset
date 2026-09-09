@@ -151,6 +151,7 @@ ShapedText shapeText(const std::u16string& text, const std::vector<StyleRun>& ru
             g.inline_ = pen;
             g.block = top;
             g.advance = adv;
+            g.boxAfter = adv;
             g.size = style.size;
             g.charIndex = static_cast<uint32_t>(seg.start);
             g.styleIndex = seg.styleIndex;
@@ -194,6 +195,7 @@ ShapedText shapeText(const std::u16string& text, const std::vector<StyleRun>& ru
             g.inline_ = pen;
             g.block = 0.0f;
             g.advance = adv;
+            g.boxAfter = adv;
             g.size = style.size;
             g.charIndex = static_cast<uint32_t>(seg.start);
             g.styleIndex = seg.styleIndex;
@@ -294,6 +296,8 @@ ShapedText shapeText(const std::u16string& text, const std::vector<StyleRun>& ru
                     // 列方向の送りはクラスタで 1 回（アセント＋ディセント = 絵文字の高さ）
                     g.block = -emojiWidth * 0.5f + emojiX + xo * blockScale;
                     g.inline_ = pen + emojiAsc - yo * blockScale;
+                    g.boxBefore = emojiAsc - yo * blockScale;
+                    g.boxAfter = emojiDesc + yo * blockScale;
                     emojiX += pos[k].x_advance * s * advScale;
                     adv = (k == j) ? (emojiAsc + emojiDesc) : 0.0f;
                 } else if (vertical && seg.upright) {
@@ -302,16 +306,22 @@ ShapedText shapeText(const std::u16string& text, const std::vector<StyleRun>& ru
                     g.block = xo * blockScale;
                     g.inline_ = pen - yo * advScale;
                     adv = -pos[k].y_advance * s * advScale;
+                    g.boxBefore = -yo * advScale;
+                    g.boxAfter = adv + yo * advScale;
                 } else if (vertical) {
                     // 横倒し: 横組みで組んでから列へ 90 度倒す
                     //   ローカル (lx, ly[y-up]) → (block, inline) = (ly + baseline, lx)
                     g.block = yo * blockScale + baseline;
                     g.inline_ = pen + xo * advScale;
                     adv = pos[k].x_advance * s * advScale;
+                    g.boxBefore = xo * advScale;
+                    g.boxAfter = adv - xo * advScale;
                 } else {
                     g.inline_ = pen + xo * advScale;
                     g.block = baseline - yo * blockScale;
                     adv = pos[k].x_advance * s * advScale;
+                    g.boxBefore = xo * advScale;
+                    g.boxAfter = adv - xo * advScale;
                 }
                 g.block += vertical ? shift : -shift;
                 g.advance = adv;

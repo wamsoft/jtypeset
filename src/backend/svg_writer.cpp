@@ -202,6 +202,20 @@ struct Writer {
         return id;
     }
 
+    std::map<int, std::string> blurFilters;   ///< 量子化した stdDeviation → filter id
+
+    /// ガウスぼかしの <filter>（stdDeviation = 半径 / 2、ユーザー座標）。同じ半径は 1 つにまとめる
+    std::string blurFilter(float radius) {
+        const int key = static_cast<int>(std::lround(radius * 100.0f));
+        auto it = blurFilters.find(key);
+        if (it != blurFilters.end()) return it->second;
+        const std::string id = "blur" + std::to_string(blurFilters.size());
+        defs += "<filter id=\"" + id + "\" x=\"-100%\" y=\"-100%\" width=\"300%\" height=\"300%\">"
+                "<feGaussianBlur stdDeviation=\"" + fmt(radius * 0.5f, opts.precision) + "\"/></filter>\n";
+        blurFilters.emplace(key, id);
+        return id;
+    }
+
     void glyphRun(const dl::GlyphRun& run, const Matrix& ctm, float opacity) {
         if (!run.face || run.glyphs.empty()) return;
         const float upem = font::unitsPerEm(*run.face);
@@ -224,6 +238,7 @@ struct Writer {
         }
 
         body += "<g" + attrs;
+        if (run.blur > 0.0f) body += " filter=\"url(#" + blurFilter(run.blur * devScale) + ")\"";
         if (opts.includeText && run.text) {
             body += " aria-label=\"" + escapeXml(utf16ToUtf8(*run.text)) + "\"";
         }

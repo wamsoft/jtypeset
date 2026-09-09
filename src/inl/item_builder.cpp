@@ -226,6 +226,8 @@ CompositeResult layoutTateChuYoko(const std::u16string& sub, const ItemBuildCont
         g.block = (src.inline_ - runWidth * 0.5f) * scale;
         g.inline_ = em * 0.5f + src.block * scale;
         g.advance = src.advance * scale;
+        g.boxBefore = g.inline_;        // 縦中横の箱は 1em
+        g.boxAfter = em - g.inline_;
         Mat2 s;
         s.xx = scale;
         g.xform = multiply(s, src.xform);

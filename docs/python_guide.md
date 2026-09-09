@@ -44,7 +44,8 @@ pages[0].save_svg("out_p1.svg")
 | 型 | 役割 |
 |---|---|
 | `FontSet` | フォントを開いてキー／family 名で引く。文字が無ければ次の family へフォールバック |
-| `TextStyle` / `ParagraphStyle` | 文字（フォント・サイズ・色・ベースラインのずらし…）／段落（揃え・行送り・一字下げ・空白保持・タブ幅…） |
+| `TextStyle` / `ParagraphStyle` | 文字（フォント・サイズ・色・縁取り・影 `shadow`・層 `layers`・下線 `underline`・打消し線 `strikethrough`・ベースラインのずらし…）／段落（揃え・行送り・一字下げ・空白保持・タブ幅…） |
+| `TextShadow` / `TextLayer` / `TextDecoration` | 影（色・ずらし・ぼかし）／外観の 1 層（塗り・縁取り・ずらし・ぼかし。`layers` に下から上の順）／下線・打消し線（色・太さ・位置の補正） |
 | `Paragraph` | run の列＋注記。`add_run(text, style, literal=False)`、`add_image`、`add_object`（外部オブジェクト）、`add_footnote`、`annotate` |
 | `Annotation` | `ruby(start, end, text, mode, scale)`、`tate_chu_yoko`、`emphasis(..., opposite_side)`、`warichu`、`jidori` |
 | `Flow` と各 Block | `add_paragraph` / `add_heading(p, level, style, numbered)` / `add_list(ListBlock)` / `add_table(TableBlock)` / `add_image(ImageBlock)` / `add_object(ObjectBlock)` / `add_toc(TocBlock)` / `add_index(IndexBlock)` / `add_rule` / `add_page_break` / `add_column_break` / `add_section(columns)` |
