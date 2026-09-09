@@ -25,7 +25,7 @@ void computeExtraLeading(LineBox& line, Pt pitch, bool vertical) {
             top = std::min(top, g.block);
             bottom = std::max(bottom, g.block + g.object->size.h);
             any = true;
-        } else if (g.image) {
+        } else if (g.image || g.placeholder) {
             const Pt half = vertical ? g.imageSize.w * 0.5f : g.imageSize.h * 0.5f;
             top = std::min(top, g.block - half);
             bottom = std::max(bottom, g.block + half);
@@ -180,8 +180,14 @@ ParagraphFragment ParagraphLayouter::layoutOnce(const Paragraph& para, WritingMo
         images.push_back(r.image);
         imageSizes.push_back(r.imageSize);
         objects.push_back(r.object);
+        frag.placeholders.push_back(r.placeholder);
+        frag.placeholderIds.push_back(r.placeholder ? r.placeholderId : std::string());
     }
-    if (frag.styles.empty()) frag.styles.push_back(TextStyle{});
+    if (frag.styles.empty()) {
+        frag.styles.push_back(TextStyle{});
+        frag.placeholders.push_back(false);
+        frag.placeholderIds.push_back(std::string());
+    }
     for (const TextStyle& st : frag.styles) {
         StyleMetrics sm;
         if (std::shared_ptr<glyphware::Face> primary = fonts_.primary(st.font)) {
@@ -261,7 +267,8 @@ ParagraphFragment ParagraphLayouter::layoutOnce(const Paragraph& para, WritingMo
             const std::vector<StyleRun> runs = clipRuns(allRuns, pos, trimmed);
             const std::vector<Annotation> anns = clipAnnotations(para.annotations, pos, trimmed);
 
-            ShapeContext sctx{fonts_, wm, para.style.orientation, &frag.styles, &images, &imageSizes, &objects};
+            ShapeContext sctx{fonts_, wm, para.style.orientation, &frag.styles, &images, &imageSizes, &objects,
+                              &frag.placeholders};
             const ShapedText shaped = shapeText(sub, runs, sctx);
 
             ItemBuildContext ictx{fonts_, wm, para.style.orientation, &frag.styles, &base,
@@ -390,18 +397,21 @@ namespace {
 
 /// 行内の下線／打消し線を矩形で出す。同じスタイルの連続したグリフをひとつの線にする
 void emitDecorations(dl::DisplayList& out, const ParagraphFragment& frag, const LineBox& line,
-                     WritingMode wm, Point lo, bool underline) {
+                     WritingMode wm, Point lo, bool underline, size_t maxChars) {
     const bool vertical = isVertical(wm);
+    auto skip = [&](const PlacedGlyph& g) {
+        return g.object || g.image || g.placeholder || g.charIndex >= maxChars;
+    };
     size_t i = 0;
     while (i < line.glyphs.size()) {
         const PlacedGlyph& g0 = line.glyphs[i];
-        if (g0.object || g0.image) { ++i; continue; }
+        if (skip(g0)) { ++i; continue; }
         const size_t si = g0.styleIndex < frag.styles.size() ? g0.styleIndex : 0;
         const TextStyle& style = frag.styles[si];
         const std::optional<TextDecoration>& deco = underline ? style.underline : style.strikethrough;
         if (!deco) { ++i; continue; }
         size_t j = i + 1;
-        while (j < line.glyphs.size() && !line.glyphs[j].object && !line.glyphs[j].image &&
+        while (j < line.glyphs.size() && !skip(line.glyphs[j]) &&
                line.glyphs[j].styleIndex == g0.styleIndex) ++j;
         const PlacedGlyph& g1 = line.glyphs[j - 1];
 
@@ -436,7 +446,7 @@ void emitDecorations(dl::DisplayList& out, const ParagraphFragment& frag, const 
 } // namespace
 
 void emitParagraph(dl::DisplayList& out, const ParagraphFragment& frag, WritingMode wm,
-                   Point origin, int lineOffset) {
+                   Point origin, int lineOffset, size_t maxChars) {
     // スタイルごとの層（下から上）
     std::vector<std::vector<TextLayer>> layers;
     layers.reserve(frag.styles.size());
@@ -455,7 +465,7 @@ void emitParagraph(dl::DisplayList& out, const ParagraphFragment& frag, WritingM
                                       frag.linePitch * static_cast<float>(lineOffset) + frag.lineCenterOffset(li),
                                       line.indent);
 
-        emitDecorations(out, frag, line, wm, lo, true);
+        emitDecorations(out, frag, line, wm, lo, true, maxChars);
 
         // 層は上から数えて揃える（k = 0 が最上層）。影や外側の縁取りが隣の文字の塗りに載らないよう、
         // 下の層を行全体で先に出す。画像・オブジェクト・カラーグリフは最上層のときに 1 回だけ出す
@@ -471,6 +481,8 @@ void emitParagraph(dl::DisplayList& out, const ParagraphFragment& frag, WritingM
             };
 
             for (const PlacedGlyph& g : line.glyphs) {
+                if (g.charIndex >= maxChars) continue;
+                if (g.placeholder) { flush(); continue; }
                 if (g.object) {
                     if (k != 0) continue;
                     // 行内オブジェクト: 論理の箱 [inline_, inline_+w] × [block, block+h] に置く。縦組みは横倒し
@@ -538,7 +550,7 @@ void emitParagraph(dl::DisplayList& out, const ParagraphFragment& frag, WritingM
             flush();
         }
 
-        emitDecorations(out, frag, line, wm, lo, false);
+        emitDecorations(out, frag, line, wm, lo, false, maxChars);
     }
 }
 

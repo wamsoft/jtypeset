@@ -48,6 +48,9 @@ struct InlineRun {
     std::shared_ptr<const Paragraph> footnote;
     /// true なら `{name}` の置換や `{index:}` の収集をしない（コードなど、波括弧をそのまま出す run）
     bool literal = false;
+    /// 行内プレースホルダ（大きさ imageSize の空箱。描かない。ホストがウィジェット等を重ねる）
+    bool placeholder = false;
+    std::string placeholderId;
 };
 
 struct Paragraph {
@@ -72,6 +75,21 @@ struct Paragraph {
         r.text = u"\uFFFC";
         r.style = std::move(style);
         r.image = std::move(image);
+        r.imageSize = size;
+        runs.push_back(std::move(r));
+    }
+
+    /**
+     * 行内プレースホルダ（大きさだけの空箱）を足す。本文中の位置は U+FFFC 1 文字ぶん。描かれないので、
+     * 組んだあと placeholderRects() / charBoxes() で位置を取り、ホストがウィジェットや画像を重ねる。
+     * 中心が行の中心線に載る（行内画像と同じ）。行送りの箱から出れば行送りが広がる
+     */
+    void addPlaceholder(Size size, TextStyle style, std::string id = std::string()) {
+        InlineRun r;
+        r.text = u"\uFFFC";
+        r.style = std::move(style);
+        r.placeholder = true;
+        r.placeholderId = std::move(id);
         r.imageSize = size;
         runs.push_back(std::move(r));
     }
@@ -153,6 +171,8 @@ struct ParagraphFragment {
     std::vector<LineBox> lines;
     std::vector<TextStyle> styles;      ///< PlacedGlyph::styleIndex → スタイル
     std::vector<StyleMetrics> styleMetrics;   ///< styles と同じ添字（第一候補フォントから）
+    std::vector<std::string> placeholderIds;  ///< styles と同じ添字。プレースホルダの run だけ非空（id 未指定なら ""）
+    std::vector<bool> placeholders;           ///< styles と同じ添字。プレースホルダの run か
     size_t charStart = 0;               ///< 組んだ範囲（UTF-16）
     size_t charEnd = 0;
     bool complete = false;              ///< 本文を最後まで組めた
@@ -215,9 +235,93 @@ Point lineOriginAt(WritingMode wm, Point origin, Pt adv, Pt indent);
  * 段落を表示リストへ出す
  * @param origin 1 行目の行頭（lineOrigin 参照）
  * @param lineOffset fragment の 0 行目に対応する行番号（続きを別の位置から描くとき）
+ * @param maxChars 元テキストのこの位置（UTF-16）より前の文字だけ描く（段階表示。注記は親文字に従う）。
+ *                 組版はやり直さないので、全文で組んだ行分割のまま途中まで出る
  */
 void emitParagraph(dl::DisplayList& out, const ParagraphFragment& frag, WritingMode wm,
-                   Point origin, int lineOffset = 0);
+                   Point origin, int lineOffset = 0, size_t maxChars = static_cast<size_t>(-1));
+
+//------------------------------------------------------------------------------
+// 取り出し口（ホストがリンク・ヒットテスト・キャレット・段階表示を作るための問い合わせ）
+//------------------------------------------------------------------------------
+
+/**
+ * 組んだあとの 1 文字（クラスタのグリフ 1 つ）の箱。注記のグリフは含めない
+ */
+struct CharBox {
+    size_t lineIndex = 0;           ///< ParagraphFragment::lines の添字
+    uint32_t charIndex = 0;         ///< 元テキストでの位置（UTF-16）
+    Pt inlineStart = 0.0f;          ///< 箱の始端（行頭から。indent は含まない）
+    Pt inlineEnd = 0.0f;            ///< 箱の終端
+    Pt blockMin = 0.0f;             ///< 箱の block 範囲（中心線から。em box、画像・オブジェクトはその大きさ）
+    Pt blockMax = 0.0f;
+    uint32_t styleIndex = 0;
+    uint32_t gid = 0;
+    Pt size = 0.0f;
+    std::shared_ptr<glyphware::Face> face;
+    bool image = false;
+    bool object = false;
+    bool placeholder = false;
+    /// 物理座標での矩形
+    Rect rect(WritingMode wm, Point lineOrigin) const;
+};
+
+/// 行 lineIndex の文字の箱（送り方向の順。注記のグリフは含めない。wm は画像の箱の向きに使う）
+std::vector<CharBox> charBoxes(const ParagraphFragment& frag, WritingMode wm, size_t lineIndex);
+
+/// 行 lineIndex の行頭（物理）。emitParagraph と同じ origin / lineOffset を渡す
+Point lineOriginOf(const ParagraphFragment& frag, WritingMode wm, Point origin, size_t lineIndex,
+                   int lineOffset = 0);
+
+/**
+ * 文字範囲 [charStart, charEnd) を覆う矩形（行ごとに 1 つ。物理座標。縦組みは縦長）。
+ * リンクの当たり判定・選択範囲の描画用。範囲に文字が無い行は出ない
+ */
+std::vector<Rect> rectsFor(const ParagraphFragment& frag, WritingMode wm, Point origin,
+                           size_t charStart, size_t charEnd, int lineOffset = 0);
+
+/// プレースホルダの位置（id と物理矩形）。id 未指定のものは ""
+struct PlaceholderRect {
+    std::string id;
+    uint32_t charIndex = 0;
+    Rect rect;
+};
+std::vector<PlaceholderRect> placeholderRects(const ParagraphFragment& frag, WritingMode wm, Point origin,
+                                              int lineOffset = 0);
+
+/**
+ * 点 → 文字
+ */
+struct HitResult {
+    size_t lineIndex = 0;
+    uint32_t charIndex = 0;         ///< 当たった文字（行の後ろの余白なら行末 = line.charEnd）
+    bool inside = false;            ///< 文字の箱の中に当たったか（false なら行の端に丸めた）
+    bool after = false;             ///< 箱の後半に当たった（キャレットを次の文字の前に置く判断用）
+};
+/// 行送りの箱の範囲に無い点は nullopt。行の前後の余白は最も近い文字（行頭／行末）に丸める
+std::optional<HitResult> hitTest(const ParagraphFragment& frag, WritingMode wm, Point origin, Point p,
+                                 int lineOffset = 0);
+
+/**
+ * キャレット矩形: charIndex の文字の始端（charIndex が行末なら最後の文字の終端）に、行送り方向の
+ * em の高さで thickness 幅の矩形。文字が無い（範囲外）なら nullopt。行またぎの位置は前の行の行末側
+ */
+std::optional<Rect> caretRect(const ParagraphFragment& frag, WritingMode wm, Point origin, size_t charIndex,
+                              int lineOffset = 0, Pt thickness = 1.0f);
+
+/**
+ * 1 行計測（折り返さない）
+ */
+struct TextMetrics {
+    Pt advance = 0.0f;              ///< 送り方向の長さ（字間・約物の詰めは入らない: ベタ組みの送りの和）
+    Pt ascent = 0.0f;               ///< 中心線から注記側の張り出し（横組み: 上）。正
+    Pt descent = 0.0f;              ///< 反対側。正
+    size_t clusterCount = 0;        ///< クラスタ（文字）数
+    size_t glyphCount = 0;
+};
+TextMetrics measureText(font::FontSet& fonts, const std::u16string& text, const TextStyle& style,
+                        WritingMode wm = WritingMode::HorizontalTb,
+                        TextOrientation orientation = TextOrientation::Mixed);
 
 } // namespace typeset::inl
 

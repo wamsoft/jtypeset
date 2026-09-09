@@ -140,6 +140,7 @@ RubyResult layoutRuby(const std::u16string& rubyText, const ItemBuildContext& ct
             glyph.block += shift;
             glyph.inline_ += delta;
             glyph.styleIndex = styleIndex;
+            glyph.annotation = true;
             out.glyphs.push_back(std::move(glyph));
         }
     }
@@ -185,6 +186,7 @@ RubyResult layoutJukugoRuby(const std::vector<ShapedText>& parts, const std::vec
             g.block += shift;
             g.inline_ += x[i];
             g.styleIndex = styleIndex;
+            g.annotation = true;
             out.glyphs.push_back(std::move(g));
         }
     }
@@ -302,6 +304,7 @@ CompositeResult layoutWarichu(const std::u16string& content, const ItemBuildCont
                     glyph.block += shift;
                     glyph.inline_ += v;
                     glyph.styleIndex = styleIndex;
+                    glyph.annotation = true;
                     out.glyphs.push_back(std::move(glyph));
                 }
             } else {
@@ -312,6 +315,7 @@ CompositeResult layoutWarichu(const std::u16string& content, const ItemBuildCont
                     glyph.block += shift;
                     glyph.inline_ += delta;
                     glyph.styleIndex = styleIndex;
+                    glyph.annotation = true;
                     out.glyphs.push_back(std::move(glyph));
                 }
             }
@@ -355,6 +359,7 @@ bool layoutEmphasisMark(EmphasisMark mark, const ItemBuildContext& ctx, Pt em, P
         glyph.inline_ += targetInline - inkInline;
         glyph.block += targetBlock - inkBlock;
         glyph.styleIndex = styleIndex;
+        glyph.annotation = true;
         out.push_back(std::move(glyph));
     }
     return true;

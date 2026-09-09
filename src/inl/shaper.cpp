@@ -164,16 +164,25 @@ ShapedText shapeText(const std::u16string& text, const std::vector<StyleRun>& ru
             continue;
         }
 
-        // 行内画像: 1 クラスタの箱として置く（中心を行の中心線へ）
-        if (ctx.images && seg.styleIndex < ctx.images->size() && (*ctx.images)[seg.styleIndex]) {
-            const std::shared_ptr<const dl::Image>& img = (*ctx.images)[seg.styleIndex];
+        // 行内画像／プレースホルダ: 1 クラスタの箱として置く（中心を行の中心線へ）。プレースホルダは描かない空箱
+        const bool placeholder = ctx.placeholders && seg.styleIndex < ctx.placeholders->size() &&
+                                 (*ctx.placeholders)[seg.styleIndex];
+        if (placeholder ||
+            (ctx.images && seg.styleIndex < ctx.images->size() && (*ctx.images)[seg.styleIndex])) {
+            const std::shared_ptr<const dl::Image> img =
+                placeholder ? nullptr : (*ctx.images)[seg.styleIndex];
             Size sz = (ctx.imageSizes && seg.styleIndex < ctx.imageSizes->size())
                           ? (*ctx.imageSizes)[seg.styleIndex] : Size{};
-            const float pw = static_cast<float>(std::max(1, img->width));
-            const float ph = static_cast<float>(std::max(1, img->height));
-            if (sz.w <= 0.0f && sz.h <= 0.0f) { sz.w = pw; sz.h = ph; }
-            else if (sz.w <= 0.0f) sz.w = sz.h * pw / ph;
-            else if (sz.h <= 0.0f) sz.h = sz.w * ph / pw;
+            if (img) {
+                const float pw = static_cast<float>(std::max(1, img->width));
+                const float ph = static_cast<float>(std::max(1, img->height));
+                if (sz.w <= 0.0f && sz.h <= 0.0f) { sz.w = pw; sz.h = ph; }
+                else if (sz.w <= 0.0f) sz.w = sz.h * pw / ph;
+                else if (sz.h <= 0.0f) sz.h = sz.w * ph / pw;
+            } else {
+                if (sz.w <= 0.0f) sz.w = style.size;
+                if (sz.h <= 0.0f) sz.h = style.size;
+            }
             const Pt adv = vertical ? sz.h : sz.w;
             const Pt half = vertical ? sz.w * 0.5f : sz.h * 0.5f;
 
@@ -191,6 +200,7 @@ ShapedText shapeText(const std::u16string& text, const std::vector<StyleRun>& ru
 
             PlacedGlyph g;
             g.image = img;
+            g.placeholder = placeholder;
             g.imageSize = sz;
             g.inline_ = pen;
             g.block = 0.0f;

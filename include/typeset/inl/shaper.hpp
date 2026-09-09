@@ -34,6 +34,8 @@ struct ShapeContext {
     const std::vector<Size>* imageSizes = nullptr;
     /// styleIndex → 行内オブジェクト（無い run は nullptr）
     const std::vector<std::shared_ptr<const obj::ObjectResult>>* objects = nullptr;
+    /// styleIndex → 行内プレースホルダか（大きさは imageSizes）
+    const std::vector<bool>* placeholders = nullptr;
 };
 
 /**

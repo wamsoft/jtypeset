@@ -42,6 +42,29 @@ struct LineInfo {
     int lineIndex;
 };
 
+LineInfo lineInfoOf(const inl::LineBox& l) {
+    return LineInfo{l.charStart, l.charEnd, l.length, l.naturalLength, l.indent, l.paragraphEnd, l.hanging, l.lineIndex};
+}
+
+/// layout_paragraph の結果（fragment と書字方向を持ち、取り出し口を提供する）
+struct ParagraphLayout {
+    inl::ParagraphFragment frag;
+    WritingMode wm = WritingMode::HorizontalTb;
+};
+
+/// 文字 1 つの情報（CharBox ＋ 物理矩形 ＋ face のキー）
+struct CharInfo {
+    size_t lineIndex;
+    uint32_t charIndex;
+    uint32_t styleIndex;
+    uint32_t gid;
+    float size;
+    std::string faceKey;
+    bool image, object, placeholder;
+    float inlineStart, inlineEnd, blockMin, blockMax;
+    Rect rect;
+};
+
 } // namespace
 
 PYBIND11_MODULE(_jtypeset, m) {
@@ -336,6 +359,12 @@ Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
                  p.addImage(img, size, std::move(st));
              },
              py::arg("image"), py::arg("size"), py::arg("style"), "行内画像を足す（本文中の位置は 1 文字ぶん）")
+        .def("add_placeholder",
+             [](inl::Paragraph& p, Size size, TextStyle st, std::string id) {
+                 p.addPlaceholder(size, std::move(st), std::move(id));
+             },
+             py::arg("size"), py::arg("style"), py::arg("id") = std::string(),
+             "行内プレースホルダ（描かない空箱、本文中の位置は 1 文字ぶん）を足す。位置は ParagraphLayout.placeholder_rects で取る")
         .def("add_object",
              [](inl::Paragraph& p, std::string handler, std::u16string source, TextStyle st,
                 std::map<std::string, std::string> params) {
@@ -761,6 +790,151 @@ Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
             return "LineInfo(chars=" + std::to_string(l.charStart) + ".." + std::to_string(l.charEnd) +
                    ", length=" + std::to_string(l.length) + ")";
         });
+    py::class_<CharInfo>(m, "CharInfo", "組んだあとの文字 1 つ（位置・大きさ・スタイル番号・グリフ・物理矩形）")
+        .def_readonly("line_index", &CharInfo::lineIndex)
+        .def_readonly("char_index", &CharInfo::charIndex, "元テキストでの位置（UTF-16）")
+        .def_readonly("style_index", &CharInfo::styleIndex, "Paragraph の run の番号")
+        .def_readonly("gid", &CharInfo::gid)
+        .def_readonly("size", &CharInfo::size)
+        .def_readonly("face_key", &CharInfo::faceKey, "FontSet のキー")
+        .def_readonly("image", &CharInfo::image)
+        .def_readonly("object", &CharInfo::object)
+        .def_readonly("placeholder", &CharInfo::placeholder)
+        .def_readonly("inline_start", &CharInfo::inlineStart, "箱の始端（行頭から、pt）")
+        .def_readonly("inline_end", &CharInfo::inlineEnd)
+        .def_readonly("block_min", &CharInfo::blockMin, "箱の block 範囲（行の中心線から）")
+        .def_readonly("block_max", &CharInfo::blockMax)
+        .def_readonly("rect", &CharInfo::rect, "物理矩形（origin を渡して組んだとき）")
+        .def("__repr__", [](const CharInfo& c) {
+            return "CharInfo(line=" + std::to_string(c.lineIndex) + ", char=" + std::to_string(c.charIndex) +
+                   ", rect=(" + std::to_string(c.rect.x) + ", " + std::to_string(c.rect.y) + ", " +
+                   std::to_string(c.rect.w) + ", " + std::to_string(c.rect.h) + "))";
+        });
+    py::class_<inl::HitResult>(m, "HitResult", "hit_test の結果")
+        .def_readonly("line_index", &inl::HitResult::lineIndex)
+        .def_readonly("char_index", &inl::HitResult::charIndex, "当たった文字（行の後ろの余白なら行末）")
+        .def_readonly("inside", &inl::HitResult::inside, "文字の箱の中か（False なら行の端に丸めた）")
+        .def_readonly("after", &inl::HitResult::after, "箱の後半か（キャレットを次の文字の前に置く判断用）");
+    py::class_<inl::PlaceholderRect>(m, "PlaceholderRect", "プレースホルダの位置（id・文字位置・物理矩形）")
+        .def_readonly("id", &inl::PlaceholderRect::id)
+        .def_readonly("char_index", &inl::PlaceholderRect::charIndex)
+        .def_readonly("rect", &inl::PlaceholderRect::rect);
+    py::class_<inl::TextMetrics>(m, "TextMetrics", "measure_text の結果")
+        .def_readonly("advance", &inl::TextMetrics::advance, "送り方向の長さ（pt）")
+        .def_readonly("ascent", &inl::TextMetrics::ascent, "中心線から注記側（横組み: 上）の張り出し")
+        .def_readonly("descent", &inl::TextMetrics::descent)
+        .def_readonly("cluster_count", &inl::TextMetrics::clusterCount)
+        .def_readonly("glyph_count", &inl::TextMetrics::glyphCount);
+
+    py::class_<ParagraphLayout>(m, "ParagraphLayout",
+                                "layout_paragraph の結果。行の列（len / 添字 / 反復で LineInfo）と、組んだあとの取り出し口。"
+                                "origin は 1 行目の行頭（横組み: 左端 x と 1 行目の中心線 y、縦組み: 1 列目の中心線 x と上端 y）")
+        .def_property_readonly("lines", [](const ParagraphLayout& pl) {
+            std::vector<LineInfo> out;
+            for (const inl::LineBox& l : pl.frag.lines) out.push_back(lineInfoOf(l));
+            return out;
+        })
+        .def("__len__", [](const ParagraphLayout& pl) { return pl.frag.lines.size(); })
+        .def("__getitem__", [](const ParagraphLayout& pl, ptrdiff_t i) {
+            const ptrdiff_t n = static_cast<ptrdiff_t>(pl.frag.lines.size());
+            if (i < 0) i += n;
+            if (i < 0 || i >= n) throw py::index_error();
+            return lineInfoOf(pl.frag.lines[static_cast<size_t>(i)]);
+        })
+        .def("__iter__", [](const ParagraphLayout& pl) {
+            std::vector<LineInfo> out;
+            for (const inl::LineBox& l : pl.frag.lines) out.push_back(lineInfoOf(l));
+            return py::iter(py::cast(out));
+        })
+        .def_property_readonly("writing_mode", [](const ParagraphLayout& pl) { return pl.wm; })
+        .def_property_readonly("line_pitch", [](const ParagraphLayout& pl) { return pl.frag.linePitch; })
+        .def_property_readonly("block_extent", [](const ParagraphLayout& pl) { return pl.frag.blockExtent(); },
+                               "全行が占める行送り方向の量（pt）")
+        .def_property_readonly("complete", [](const ParagraphLayout& pl) { return pl.frag.complete; })
+        .def_property_readonly("char_end", [](const ParagraphLayout& pl) { return pl.frag.charEnd; })
+        .def("line_origin",
+             [](const ParagraphLayout& pl, size_t line, Point origin, int lineOffset) {
+                 return inl::lineOriginOf(pl.frag, pl.wm, origin, line, lineOffset);
+             },
+             py::arg("line"), py::arg("origin") = Point{0.0f, 0.0f}, py::arg("line_offset") = 0,
+             "行 line の行頭（物理）")
+        .def("char_boxes",
+             [](const ParagraphLayout& pl, size_t line, Point origin, int lineOffset) {
+                 std::vector<CharInfo> out;
+                 const Point lo = inl::lineOriginOf(pl.frag, pl.wm, origin, line, lineOffset);
+                 for (const inl::CharBox& b : inl::charBoxes(pl.frag, pl.wm, line)) {
+                     CharInfo c{b.lineIndex, b.charIndex, b.styleIndex, b.gid, b.size,
+                                b.face ? b.face->descriptor().key : std::string(),
+                                b.image, b.object, b.placeholder,
+                                b.inlineStart, b.inlineEnd, b.blockMin, b.blockMax, b.rect(pl.wm, lo)};
+                     out.push_back(std::move(c));
+                 }
+                 return out;
+             },
+             py::arg("line"), py::arg("origin") = Point{0.0f, 0.0f}, py::arg("line_offset") = 0,
+             "行 line の文字の箱（送り方向の順。ルビ等の注記は含まない）")
+        .def("rects_for",
+             [](const ParagraphLayout& pl, size_t charStart, size_t charEnd, Point origin, int lineOffset) {
+                 return inl::rectsFor(pl.frag, pl.wm, origin, charStart, charEnd, lineOffset);
+             },
+             py::arg("char_start"), py::arg("char_end"), py::arg("origin") = Point{0.0f, 0.0f},
+             py::arg("line_offset") = 0,
+             "文字範囲 [char_start, char_end) を覆う矩形（行ごとに 1 つ）。リンク・選択範囲用")
+        .def("placeholder_rects",
+             [](const ParagraphLayout& pl, Point origin, int lineOffset) {
+                 return inl::placeholderRects(pl.frag, pl.wm, origin, lineOffset);
+             },
+             py::arg("origin") = Point{0.0f, 0.0f}, py::arg("line_offset") = 0)
+        .def("hit_test",
+             [](const ParagraphLayout& pl, Point p, Point origin, int lineOffset) {
+                 return inl::hitTest(pl.frag, pl.wm, origin, p, lineOffset);
+             },
+             py::arg("point"), py::arg("origin") = Point{0.0f, 0.0f}, py::arg("line_offset") = 0,
+             "点 → 文字。行送りの箱の外なら None")
+        .def("caret_rect",
+             [](const ParagraphLayout& pl, size_t charIndex, Point origin, int lineOffset, Pt thickness) {
+                 return inl::caretRect(pl.frag, pl.wm, origin, charIndex, lineOffset, thickness);
+             },
+             py::arg("char_index"), py::arg("origin") = Point{0.0f, 0.0f}, py::arg("line_offset") = 0,
+             py::arg("thickness") = 1.0f, "キャレット矩形（文字の始端。行末なら終端）。範囲外は None")
+        .def("render",
+             [](const ParagraphLayout& pl, Size size, Point origin, float dpi, Color background,
+                int lineOffset, size_t maxChars) {
+                 dl::DisplayList list;
+                 list.page = size;
+                 inl::emitParagraph(list, pl.frag, pl.wm, origin, lineOffset, maxChars);
+                 backend::RasterRenderer r;
+                 backend::RasterOptions o;
+                 o.dpi = dpi;
+                 o.background = background;
+                 backend::Bitmap bmp = r.render(list, o);
+                 return py::make_tuple(bmp.width, bmp.height,
+                                       py::bytes(reinterpret_cast<const char*>(bmp.argb.data()),
+                                                 bmp.argb.size() * 4));
+             },
+             py::arg("size"), py::arg("origin"), py::arg("dpi") = 144.0f,
+             py::arg("background") = Color{255, 255, 255, 255}, py::arg("line_offset") = 0,
+             py::arg("max_chars") = static_cast<size_t>(-1),
+             "size（pt）の面に origin から描いて (width, height, ARGB8888 bytes) を返す。max_chars で途中まで（段階表示）")
+        .def("save_png",
+             [](const ParagraphLayout& pl, const std::string& path, Size size, Point origin, float dpi,
+                Color background, int lineOffset, size_t maxChars) {
+                 dl::DisplayList list;
+                 list.page = size;
+                 inl::emitParagraph(list, pl.frag, pl.wm, origin, lineOffset, maxChars);
+                 backend::RasterRenderer r;
+                 backend::RasterOptions o;
+                 o.dpi = dpi;
+                 o.background = background;
+                 return backend::savePng(r.render(list, o), path);
+             },
+             py::arg("path"), py::arg("size"), py::arg("origin"), py::arg("dpi") = 144.0f,
+             py::arg("background") = Color{255, 255, 255, 255}, py::arg("line_offset") = 0,
+             py::arg("max_chars") = static_cast<size_t>(-1))
+        .def("__repr__", [](const ParagraphLayout& pl) {
+            return "ParagraphLayout(lines=" + std::to_string(pl.frag.lines.size()) + ")";
+        });
+
     m.def("layout_paragraph",
           [](font::FontSet& fonts, const inl::Paragraph& para, WritingMode wm,
              std::vector<Pt> lineLengths, Pt defaultLength) {
@@ -776,15 +950,18 @@ Markdown → PDF は jtypeset.md（jtypeset-md コマンド）。)doc";
               shape.lens = std::move(lineLengths);
               shape.def = defaultLength;
               inl::ParagraphLayouter layouter(fonts);
-              const inl::ParagraphFragment frag = layouter.layout(para, wm, shape);
-              std::vector<LineInfo> out;
-              for (const inl::LineBox& l : frag.lines) {
-                  out.push_back(LineInfo{l.charStart, l.charEnd, l.length, l.naturalLength, l.indent,
-                                         l.paragraphEnd, l.hanging, l.lineIndex});
-              }
-              return out;
+              ParagraphLayout pl;
+              pl.frag = layouter.layout(para, wm, shape);
+              pl.wm = wm;
+              return pl;
           },
           py::arg("fonts"), py::arg("paragraph"), py::arg("writing_mode"),
           py::arg("line_lengths") = std::vector<Pt>{}, py::arg("default_length") = 200.0f,
-          "段落を組んで行ごとの文字範囲と長さを返す（行長は行ごとに指定できる = \\parshape）");
+          "段落を組んで ParagraphLayout（行ごとの文字範囲と長さ＋取り出し口）を返す（行長は行ごとに指定できる = \\parshape）");
+    m.def("measure_text",
+          [](font::FontSet& fonts, const std::u16string& text, const TextStyle& style, WritingMode wm) {
+              return inl::measureText(fonts, text, style, wm);
+          },
+          py::arg("fonts"), py::arg("text"), py::arg("style"), py::arg("writing_mode") = WritingMode::HorizontalTb,
+          "折り返さない 1 行の計測（送り・張り出し・クラスタ数）");
 }

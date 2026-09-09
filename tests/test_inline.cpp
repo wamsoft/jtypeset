@@ -815,3 +815,234 @@ TEST_CASE("font set: language-linked fonts are tried before the style's families
     CHECK((frag.lines[0].glyphs[0].face == serif));
     CHECK(frag.lines[0].glyphs[3].face->descriptor().key == "sans-zh");
 }
+
+TEST_CASE("query: char boxes, rects for a range, hit test and caret agree with the emitted glyphs") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+    inl::ParagraphLayouter layouter(fx.fonts);
+    const Pt size = 10.0f;
+    inl::Paragraph para = inl::Paragraph::plain(
+        u"吾輩は猫である。名前はまだ無い。どこで生れたかとんと見当がつかぬ。ABC def", fx.style(size));
+    para.style.firstLineIndent = 1.0f;
+    para.annotations.push_back(inl::Annotation::ruby(0, 2, u"わがはい"));
+    const inl::ConstantLineShape shape(120.0f);
+
+    for (WritingMode wm : {WritingMode::HorizontalTb, WritingMode::VerticalRl}) {
+        const inl::ParagraphFragment frag = layouter.layout(para, wm, shape);
+        REQUIRE(frag.lines.size() >= 3);
+        const Point origin{100.0f, 50.0f};
+
+        // 文字の箱: 注記（ルビ）を含まず、本文の文字と 1 対 1。送り方向に並び、隣と重ならない
+        const auto boxes0 = inl::charBoxes(frag, wm, 0);
+        REQUIRE(!boxes0.empty());
+        size_t textChars = 0;
+        for (size_t i = frag.lines[0].charStart; i < frag.lines[0].charEnd;) {
+            size_t len = 1; text::codePointAt(*frag.text, i, len); i += len; ++textChars;
+        }
+        CHECK(boxes0.size() == textChars);
+        CHECK(boxes0.front().charIndex == frag.lines[0].charStart);
+        for (size_t i = 0; i + 1 < boxes0.size(); ++i) {
+            CHECK(boxes0[i].inlineEnd <= boxes0[i + 1].inlineStart + 0.01f);
+            CHECK(boxes0[i].charIndex < boxes0[i + 1].charIndex);
+        }
+        // 箱の block 範囲は em box
+        CHECK(boxes0[0].blockMax - boxes0[0].blockMin == doctest::Approx(size));
+
+        // 描いたグリフの位置は箱の中（ペン位置は箱の始端＋boxBefore）
+        dl::DisplayList out;
+        inl::emitParagraph(out, frag, wm, origin);
+        const Point lo0 = inl::lineOriginOf(frag, wm, origin, 0);
+        for (const dl::Item& item : out.items) {
+            const auto* run = std::get_if<dl::GlyphRun>(&item);
+            if (!run) continue;
+            if (run->size != size) continue;      // ルビのグリフは親文字群にまたがるので本文だけ見る
+            for (const dl::Glyph& g : run->glyphs) {
+                if (g.charIndex >= frag.lines[0].charEnd) continue;
+                bool found = false;
+                for (const inl::CharBox& b : boxes0) {
+                    if (b.charIndex != g.charIndex) continue;
+                    const Rect r = b.rect(wm, lo0);
+                    // ペン位置は箱の送り方向の範囲内
+                    if (wm == WritingMode::HorizontalTb) found = g.pos.x >= r.x - 0.5f && g.pos.x <= r.right() + 0.5f;
+                    else found = g.pos.y >= r.y - 0.5f && g.pos.y <= r.bottom() + 0.5f;
+                    if (found) break;
+                }
+                CHECK_MESSAGE(found, "wm=" << static_cast<int>(wm) << " char=" << g.charIndex);
+            }
+        }
+
+        // 範囲 → 矩形: 1 行に収まる範囲は 1 つ、行をまたぐ範囲は行数ぶん。矩形の長さは箱の和
+        const auto r1 = inl::rectsFor(frag, wm, origin, 2, 5);        // 「は猫で」
+        REQUIRE(r1.size() == 1);
+        const Pt len1 = (wm == WritingMode::HorizontalTb) ? r1[0].w : r1[0].h;
+        CHECK(len1 == doctest::Approx(size * 3.0f).epsilon(0.05));
+        const size_t l1s = frag.lines[1].charStart;
+        const auto r2 = inl::rectsFor(frag, wm, origin, l1s - 2, l1s + 2);
+        REQUIRE(r2.size() == 2);
+        CHECK(inl::rectsFor(frag, wm, origin, 5, 5).empty());
+
+        // ヒットテスト: 各箱の中心を突くとその文字。行の外は nullopt
+        for (size_t li = 0; li < frag.lines.size(); ++li) {
+            const Point lo = inl::lineOriginOf(frag, wm, origin, li);
+            for (const inl::CharBox& b : inl::charBoxes(frag, wm, li)) {
+                const Rect r = b.rect(wm, lo);
+                const Point c{r.x + r.w * 0.5f, r.y + r.h * 0.5f};
+                const auto hit = inl::hitTest(frag, wm, origin, c);
+                REQUIRE(hit.has_value());
+                CHECK(hit->lineIndex == li);
+                CHECK(hit->charIndex == b.charIndex);
+                CHECK(hit->inside);
+            }
+        }
+        // 行頭の一字下げの余白は先頭の文字に丸める（inside = false）
+        {
+            const Point lo = inl::lineOriginOf(frag, wm, origin, 0);
+            const Point before = toPhysical(wm, LogicalPoint{-size * 0.5f, 0.0f}, lo);
+            const auto hit = inl::hitTest(frag, wm, origin, before);
+            REQUIRE(hit.has_value());
+            CHECK(hit->charIndex == frag.lines[0].charStart);
+            CHECK(!hit->inside);
+            // 行の後ろの余白は行末
+            const Point after = toPhysical(wm, LogicalPoint{frag.lines[0].length + size, 0.0f}, lo);
+            const auto hit2 = inl::hitTest(frag, wm, origin, after);
+            REQUIRE(hit2.has_value());
+            CHECK(hit2->charIndex == frag.lines[0].charEnd);
+            CHECK(hit2->after);
+        }
+        {
+            const Point far = (wm == WritingMode::HorizontalTb) ? Point{origin.x, origin.y - 100.0f}
+                                                                : Point{origin.x + 100.0f, origin.y};
+            CHECK(!inl::hitTest(frag, wm, origin, far).has_value());
+        }
+
+        // キャレット: 文字の始端。行末の位置は前の行の終端側。範囲外は nullopt
+        {
+            const auto c0 = inl::caretRect(frag, wm, origin, 3);
+            REQUIRE(c0.has_value());
+            const Rect b3 = boxes0[3].rect(wm, lo0);
+            if (wm == WritingMode::HorizontalTb) CHECK(c0->x + c0->w * 0.5f == doctest::Approx(b3.x).epsilon(0.01));
+            else CHECK(c0->y + c0->h * 0.5f == doctest::Approx(b3.y).epsilon(0.01));
+            const auto cEnd = inl::caretRect(frag, wm, origin, frag.lines[0].charEnd);
+            REQUIRE(cEnd.has_value());
+            const Rect last = boxes0.back().rect(wm, lo0);
+            if (wm == WritingMode::HorizontalTb) CHECK(cEnd->x + cEnd->w * 0.5f == doctest::Approx(last.right()).epsilon(0.01));
+            else CHECK(cEnd->y + cEnd->h * 0.5f == doctest::Approx(last.bottom()).epsilon(0.01));
+            CHECK(!inl::caretRect(frag, wm, origin, frag.text->size() + 1).has_value());
+        }
+    }
+}
+
+TEST_CASE("placeholder: occupies its box, is not drawn, and its rect can be queried") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+    inl::ParagraphLayouter layouter(fx.fonts);
+    const TextStyle st = fx.style(10.0f);
+    inl::Paragraph para;
+    para.runs.push_back(inl::InlineRun{u"吾輩は", st});
+    para.addPlaceholder(Size{30.0f, 24.0f}, st, "widget");
+    para.runs.push_back(inl::InlineRun{u"猫である", st});
+    const inl::ConstantLineShape shape(200.0f);
+
+    for (WritingMode wm : {WritingMode::HorizontalTb, WritingMode::VerticalRl}) {
+        const inl::ParagraphFragment frag = layouter.layout(para, wm, shape);
+        REQUIRE(frag.lines.size() == 1);
+        const Point origin{10.0f, 40.0f};
+        // 送りは箱の大きさ（横組み: 幅、縦組み: 高さ）
+        const Pt adv = (wm == WritingMode::HorizontalTb) ? 30.0f : 24.0f;
+        CHECK(frag.lines[0].naturalLength == doctest::Approx(10.0f * 7.0f + adv).epsilon(0.02));
+        // 行送りの箱から出るぶんは行送りが広がる（画像と同じ）
+        const Pt across = (wm == WritingMode::HorizontalTb) ? 24.0f : 30.0f;
+        CHECK(frag.lines[0].extraBefore + frag.lines[0].extraAfter ==
+              doctest::Approx(std::max(0.0f, across - frag.linePitch)));
+
+        dl::DisplayList out;
+        inl::emitParagraph(out, frag, wm, origin);
+        size_t glyphs = 0;
+        for (const dl::Item& item : out.items) {
+            CHECK(!std::holds_alternative<dl::ImageItem>(item));
+            if (const auto* run = std::get_if<dl::GlyphRun>(&item)) glyphs += run->glyphs.size();
+        }
+        CHECK(glyphs == 7);
+
+        const auto prs = inl::placeholderRects(frag, wm, origin);
+        REQUIRE(prs.size() == 1);
+        CHECK(prs[0].id == "widget");
+        CHECK(prs[0].charIndex == 3);
+        CHECK(prs[0].rect.w == doctest::Approx(30.0f));
+        CHECK(prs[0].rect.h == doctest::Approx(24.0f));
+        // 中心が行の中心線に載る
+        const Point lo = inl::lineOriginOf(frag, wm, origin, 0);
+        if (wm == WritingMode::HorizontalTb) CHECK(prs[0].rect.y + prs[0].rect.h * 0.5f == doctest::Approx(lo.y));
+        else CHECK(prs[0].rect.x + prs[0].rect.w * 0.5f == doctest::Approx(lo.x));
+        // charBoxes にも placeholder として出る
+        const auto boxes = inl::charBoxes(frag, wm, 0);
+        REQUIRE(boxes.size() == 8);
+        CHECK(boxes[3].placeholder);
+        CHECK(!boxes[3].image);
+    }
+}
+
+TEST_CASE("emitParagraph maxChars draws only the text before the position, keeping the full layout") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+    inl::ParagraphLayouter layouter(fx.fonts);
+    TextStyle st = fx.style(10.0f);
+    st.underline = TextDecoration{};
+    inl::Paragraph para = inl::Paragraph::plain(u"吾輩は猫である。名前はまだ無い。どこで生れたか。", st);
+    para.annotations.push_back(inl::Annotation::ruby(3, 4, u"ねこ"));
+    const inl::ConstantLineShape shape(100.0f);
+    const inl::ParagraphFragment frag = layouter.layout(para, WritingMode::HorizontalTb, shape);
+    REQUIRE(frag.lines.size() >= 2);
+
+    auto countGlyphs = [](const dl::DisplayList& out, uint32_t& maxChar) {
+        size_t n = 0;
+        maxChar = 0;
+        for (const dl::Item& item : out.items) {
+            if (const auto* run = std::get_if<dl::GlyphRun>(&item)) {
+                n += run->glyphs.size();
+                for (const dl::Glyph& g : run->glyphs) maxChar = std::max(maxChar, g.charIndex);
+            }
+        }
+        return n;
+    };
+    dl::DisplayList full, part, none;
+    inl::emitParagraph(full, frag, WritingMode::HorizontalTb, Point{0, 20});
+    inl::emitParagraph(part, frag, WritingMode::HorizontalTb, Point{0, 20}, 0, 5);
+    inl::emitParagraph(none, frag, WritingMode::HorizontalTb, Point{0, 20}, 0, 0);
+    uint32_t mFull = 0, mPart = 0, mNone = 0;
+    const size_t nFull = countGlyphs(full, mFull);
+    const size_t nPart = countGlyphs(part, mPart);
+    const size_t nNone = countGlyphs(none, mNone);
+    CHECK(nFull > nPart);
+    CHECK(nPart == 5 + 2);       // 本文 5 文字＋「猫」のルビ 2 文字（親文字に従う）
+    CHECK(mPart == 4);
+    CHECK(nNone == 0);
+    // 下線も途中までの範囲だけ（1 本、5 文字ぶん）
+    size_t rects = 0;
+    Pt w = 0.0f;
+    for (const dl::Item& item : part.items) {
+        if (const auto* r = std::get_if<dl::RectItem>(&item)) { ++rects; w = r->rect.w; }
+    }
+    CHECK(rects == 1);
+    CHECK(w == doctest::Approx(50.0f).epsilon(0.02));
+}
+
+TEST_CASE("measureText returns advance, extents and cluster count for one unbroken line") {
+    Fixture fx;
+    if (!fx.ok()) { MESSAGE("fonts not found; skipping"); return; }
+    const TextStyle st = fx.style(10.0f);
+    const inl::TextMetrics h = inl::measureText(fx.fonts, u"吾輩は猫", st, WritingMode::HorizontalTb);
+    CHECK(h.advance == doctest::Approx(40.0f));
+    CHECK(h.clusterCount == 4);
+    CHECK(h.glyphCount == 4);
+    CHECK(h.ascent > 0.0f);
+    CHECK(h.descent > 0.0f);
+    CHECK(h.ascent + h.descent == doctest::Approx(10.0f).epsilon(0.1));
+    const inl::TextMetrics v = inl::measureText(fx.fonts, u"吾輩は猫", st, WritingMode::VerticalRl);
+    CHECK(v.advance == doctest::Approx(40.0f));
+    const inl::TextMetrics latin = inl::measureText(fx.fonts, u"Hello", st, WritingMode::HorizontalTb);
+    CHECK(latin.advance > 15.0f);
+    CHECK(latin.advance < 40.0f);
+    CHECK(latin.clusterCount == 5);
+    CHECK(inl::measureText(fx.fonts, u"", st).clusterCount == 0);
+}

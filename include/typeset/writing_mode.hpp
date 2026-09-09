@@ -59,6 +59,14 @@ inline Point toPhysical(WritingMode wm, LogicalPoint p, Point lineOrigin) {
     return Point{lineOrigin.x + p.block, lineOrigin.y + p.inline_};
 }
 
+/// 物理座標 → 論理座標（toPhysical の逆）
+inline LogicalPoint toLogical(WritingMode wm, Point p, Point lineOrigin) {
+    if (wm == WritingMode::HorizontalTb) {
+        return LogicalPoint{p.x - lineOrigin.x, p.y - lineOrigin.y};
+    }
+    return LogicalPoint{p.y - lineOrigin.y, p.x - lineOrigin.x};
+}
+
 /**
  * 横倒しグリフの回転角（ラジアン）
  *

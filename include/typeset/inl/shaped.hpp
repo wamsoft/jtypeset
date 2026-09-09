@@ -42,6 +42,10 @@ struct PlacedGlyph {
     uint32_t charIndex = 0; ///< 元テキストでの位置（UTF-16）
     Pt embolden = 0.0f;     ///< フェイクボールドの太らせ幅
     uint32_t styleIndex = 0;///< 色・縁取りを引くためのスタイル番号
+    /// 注記のグリフ（ルビ文字・圏点・割注の内容）。charIndex は親文字の位置。取り出し口（charBoxes / hitTest）は本文と区別する
+    bool annotation = false;
+    /// 行内プレースホルダ（大きさだけの空箱。描かない。imageSize が箱の大きさ）
+    bool placeholder = false;
 
     /// 行内画像（グリフではなく画像を置く）。block は画像中心の中心線からのずれ
     std::shared_ptr<const dl::Image> image;
